@@ -64,20 +64,23 @@ function redisConnection(): Redis
 
 if (PHP_SAPI === 'frankenphp') {
     header('Content-Type: application/json');
-    try {
-        echo json_encode(imageRoundTrip(), JSON_THROW_ON_ERROR);
-    } catch (Throwable $failure) {
-        if (ini_get('ffi.enable') !== 'preload'
-            || !str_contains($failure->getMessage(), 'FFI API is restricted')
-        ) {
-            throw $failure;
+    if (ini_get('ffi.enable') === 'preload') {
+        try {
+            // Probe the directive directly because php-vips wraps failures to open a library.
+            FFI::cdef('int vips_version(int flag);', 'libvips.so.42');
+        } catch (FFI\Exception $failure) {
+            if (!str_contains($failure->getMessage(), 'FFI API is restricted')) {
+                throw $failure;
+            }
+            http_response_code(424);
+            echo json_encode([
+                'blocked' => 'ffi.enable', 'ffi_enable' => ini_get('ffi.enable'),
+                'php' => PHP_VERSION, 'sapi' => PHP_SAPI,
+            ], JSON_THROW_ON_ERROR);
+            return;
         }
-        http_response_code(424);
-        echo json_encode([
-            'blocked' => 'ffi.enable', 'ffi_enable' => ini_get('ffi.enable'),
-            'php' => PHP_VERSION, 'sapi' => PHP_SAPI,
-        ], JSON_THROW_ON_ERROR);
     }
+    echo json_encode(imageRoundTrip(), JSON_THROW_ON_ERROR);
     return;
 }
 

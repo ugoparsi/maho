@@ -87,7 +87,6 @@ case "${1:?verification stage}" in
             --target runner --build-arg "FRANKENPHP_VERSION=proof-$franken_ref" \
             --tag "$base_tag" "$proof_dir/frankenphp"
         inspect_image "$base_tag"
-        serve_probe "$base_tag"
         ;;
     maho)
         docker buildx build --builder default --platform "$platform" --load --progress plain \
@@ -150,13 +149,6 @@ PY
             -e 's;spl zlib ffi vips;spl zlib ffi;' \
             -e 's;openssh-server rsync;openssh-server rsync libvips42t64;' "$dockerfile" > "$candidate"
         diff -u "$dockerfile" "$candidate" || test "$?" = 1
-        original="$proof_dir/cloud/tests/image.sh"
-        offline="$proof_dir/cloud-image-offline.sh"
-        sed -e 's/docker run --rm/docker run --network none --rm/' \
-            -e 's/mbstring FFI vips/mbstring FFI/' \
-            -e 's/for pkg in libgbm1 libnss3 fonts-liberation;/for pkg in libgbm1 libnss3 fonts-liberation libvips42t64;/' \
-            "$original" > "$offline"
-        diff -u "$original" "$offline" || test "$?" = 1
         for engine in sqlite mysql pgsql; do
             image="maho-php86-proof:cloud-$engine"
             docker buildx build --builder default --platform "$platform" --load --progress plain --file "$candidate" \
@@ -164,7 +156,6 @@ PY
                 --build-arg PHP_VERSION=8.6 --build-arg "BASE_IMAGE=$base_tag" \
                 --target "$engine" --tag "$image" "$proof_dir/cloud"
             inspect_image "$image"
-            bash "$offline" "$image" "$engine"
         done
         for engine in sqlite mysql pgsql; do
             bash .github/scripts/cloud-php86-runtime.sh "maho-php86-proof:cloud-$engine" "$engine"

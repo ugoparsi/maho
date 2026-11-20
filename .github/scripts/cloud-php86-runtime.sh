@@ -58,6 +58,7 @@ start_web
 default_response=$(web_request)
 default_status="${default_response##*$'\n'}"
 default_json="${default_response%$'\n'*}"
+printf '%s web default HTTP %s %s\n' "$engine" "$default_status" "$default_json"
 case "$default_status" in
     200)
         jq -e --arg sha "$(jq -r .png_sha256 <<<"$cli_result")" \
@@ -72,17 +73,17 @@ case "$default_status" in
         exit 1
         ;;
 esac
-printf '%s web default HTTP %s %s\n' "$engine" "$default_status" "$default_json"
 docker rm -fv "$web_server" >/dev/null
 
 printf '%s\n' 'ffi.enable=true' > "$stage/ffi-proof.ini"
 start_web -v "$stage/ffi-proof.ini:/usr/local/etc/php/conf.d/zz-maho-ffi-proof.ini:ro"
 enabled_response=$(web_request)
-test "${enabled_response##*$'\n'}" = 200
+enabled_status="${enabled_response##*$'\n'}"
 enabled_json="${enabled_response%$'\n'*}"
+printf '%s web explicitly enabled HTTP %s %s\n' "$engine" "$enabled_status" "$enabled_json"
+test "$enabled_status" = 200
 jq -e --arg sha "$(jq -r .png_sha256 <<<"$cli_result")" \
     '.php=="8.6.0" and .sapi=="frankenphp" and .png_sha256==$sha and .geometry==[4,3]' <<<"$enabled_json"
-printf '%s web explicitly enabled HTTP 200 %s\n' "$engine" "$enabled_json"
 docker rm -fv "$web_server" >/dev/null
 
 mkdir "$socket_dir"
