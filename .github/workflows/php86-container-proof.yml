@@ -1,4 +1,4 @@
-name: PHP 8.6 container proof
+name: PHP 8.6 Cloud Redis proof
 
 on:
   push:
@@ -37,11 +37,7 @@ jobs:
         id: frankenphp
         run: bash .github/scripts/php86-container-proof.sh frankenphp
 
-      - name: Build and check the Maho image
-        if: steps.frankenphp.outcome == 'success'
-        run: bash .github/scripts/php86-container-proof.sh maho
-
-      - name: Build and check the Cloud engine images
+      - name: Build the Cloud engine images with the pinned PhpRedis source
         if: ${{ !cancelled() && steps.frankenphp.outcome == 'success' }}
         run: bash .github/scripts/php86-container-proof.sh cloud
 

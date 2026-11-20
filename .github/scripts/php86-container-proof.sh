@@ -7,6 +7,7 @@ platform="linux/$architecture"
 franken_ref=894fde1cd7bf1f7324a27776952da849cd7d2c3e
 maho_images_ref=35aeff87ea03d36e87176a7d865144f37d2c25c8
 cloud_ref=be56e8508942c32833a81c5c1a6321a8ac8330c3
+redis_ref=a6ce1e60b3e81ce3b25174aa5aaefd5590dc64fd
 php_base='docker-image://docker.io/library/php@sha256:d84acf3155d907afaa5afa9b9457c5f12016b6dc7ade84659f40cdc505cc087d'
 go_base='docker-image://docker.io/library/golang@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d'
 base_tag=dunglas/frankenphp:php8.6-trixie
@@ -105,13 +106,18 @@ case "${1:?verification stage}" in
         serve_probe "$maho_tag"
         ;;
     cloud)
+        dockerfile="$proof_dir/cloud/Dockerfile"
+        candidate="$proof_dir/cloud-redis.Dockerfile"
+        test "$(grep -c 'openssl redis session' "$dockerfile")" = 1
+        sed "s;openssl redis session;openssl phpredis/phpredis@$redis_ref session;" "$dockerfile" > "$candidate"
+        diff -u "$dockerfile" "$candidate" || test "$?" = 1
         original="$proof_dir/cloud/tests/image.sh"
         offline="$proof_dir/cloud-image-offline.sh"
         sed 's/docker run --rm/docker run --network none --rm/' "$original" > "$offline"
         diff -u "$original" "$offline" || test "$?" = 1
         for engine in sqlite mysql pgsql; do
             image="maho-php86-proof:cloud-$engine"
-            docker buildx build --builder default --platform "$platform" --load --progress plain \
+            docker buildx build --builder default --platform "$platform" --load --progress plain --file "$candidate" \
                 --build-arg PHP_VERSION=8.6 --build-arg "BASE_IMAGE=$base_tag" \
                 --target "$engine" --tag "$image" "$proof_dir/cloud"
             inspect_image "$image"
