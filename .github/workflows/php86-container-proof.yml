@@ -1,4 +1,4 @@
-name: PHP 8.6 Cloud Redis proof
+name: PHP 8.6 Cloud FFI proof
 
 on:
   push:
@@ -39,7 +39,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: bash .github/scripts/php86-container-proof.sh frankenphp
 
-      - name: Build the Cloud engine images with the pinned PhpRedis source
+      - name: Build and check the three Cloud images with libvips FFI
         if: ${{ !cancelled() && steps.frankenphp.outcome == 'success' }}
         run: bash .github/scripts/php86-container-proof.sh cloud
 

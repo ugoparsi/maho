@@ -1,0 +1,119 @@
+<?php
+
+declare(strict_types=1);
+
+if (getenv('MAHO_OWNED_CLOUD_PROBE') !== '1' || PHP_VERSION !== '8.6.0' || !PHP_ZTS
+    || file_exists('/app/app/etc/local.xml')
+) {
+    throw new LogicException('Expected an isolated PHP 8.6 Cloud fixture');
+}
+
+function verify(bool $condition, string $message): void
+{
+    if (!$condition) {
+        throw new RuntimeException($message);
+    }
+}
+
+function imageRoundTrip(): array
+{
+    require '/proof-vips/vendor/autoload.php';
+    verify(
+        Composer\InstalledVersions::getReference('jcupitt/vips') === '6dbba1bb3a4ba1e39edb71016a2aa6da5bff32ee',
+        'Unexpected php-vips source reference',
+    );
+    verify(extension_loaded('FFI') && !extension_loaded('vips'), 'Unexpected image binding');
+
+    $fixture = imagecreatetruecolor(8, 6);
+    verify($fixture instanceof GdImage, 'Could not create the synthetic source image');
+    $left = imagecolorallocate($fixture, 25, 50, 75);
+    $right = imagecolorallocate($fixture, 180, 140, 100);
+    imagefilledrectangle($fixture, 0, 0, 3, 5, $left);
+    imagefilledrectangle($fixture, 4, 0, 7, 5, $right);
+    ob_start();
+    imagepng($fixture);
+    $png = ob_get_clean();
+    verify(is_string($png) && $png !== '', 'Could not encode the synthetic PNG');
+
+    $input = Jcupitt\Vips\Image::newFromBuffer($png);
+    $output = $input->resize(0.5, ['kernel' => 'nearest']);
+    $encoded = $output->writeToBuffer('.png');
+    $decoded = Jcupitt\Vips\Image::newFromBuffer($encoded);
+    $pixels = [array_map('intval', $decoded->getpoint(0, 1)), array_map('intval', $decoded->getpoint(3, 1))];
+    verify($decoded->width === 4 && $decoded->height === 3, 'Unexpected resized geometry');
+    verify($pixels === [[25, 50, 75], [180, 140, 100]], 'The PNG round trip changed the controlled pixels');
+
+    return [
+        'php' => PHP_VERSION,
+        'sapi' => PHP_SAPI,
+        'ffi_enable' => ini_get('ffi.enable'),
+        'libvips' => Jcupitt\Vips\Config::version(),
+        'geometry' => [$decoded->width, $decoded->height],
+        'pixels' => $pixels,
+        'png_sha256' => hash('sha256', $encoded),
+    ];
+}
+
+function redisConnection(): Redis
+{
+    verify(extension_loaded('redis') && is_string(phpversion('redis')), 'Expected the compiled Redis extension');
+    $redis = new Redis();
+    verify($redis->connect('/proof-socket/redis.sock', 0, 1.0), 'Could not connect to the owned Redis socket');
+    return $redis;
+}
+
+if (PHP_SAPI === 'frankenphp') {
+    header('Content-Type: application/json');
+    try {
+        echo json_encode(imageRoundTrip(), JSON_THROW_ON_ERROR);
+    } catch (Throwable $failure) {
+        if (ini_get('ffi.enable') !== 'preload'
+            || !str_contains($failure->getMessage(), 'FFI API is restricted')
+        ) {
+            throw $failure;
+        }
+        http_response_code(424);
+        echo json_encode([
+            'blocked' => 'ffi.enable', 'ffi_enable' => ini_get('ffi.enable'),
+            'php' => PHP_VERSION, 'sapi' => PHP_SAPI,
+        ], JSON_THROW_ON_ERROR);
+    }
+    return;
+}
+
+if (PHP_SAPI !== 'cli') {
+    throw new LogicException('Unexpected test SAPI');
+}
+
+switch ($argv[1] ?? '') {
+    case 'image':
+        $result = imageRoundTrip();
+        break;
+    case 'redis':
+        $redis = redisConnection();
+        $key = 'maho:cloud:synthetic';
+        verify($redis->setEx($key, 30, 'ffi-fixture') && $redis->get($key) === 'ffi-fixture', 'Redis read/write mismatch');
+        $ttl = $redis->ttl($key);
+        verify($ttl > 0 && $ttl <= 30 && $redis->del($key) === 1, 'Redis expiry or cleanup mismatch');
+        $result = ['ext' => phpversion('redis'), 'ttl' => $ttl, 'keys_remaining' => $redis->dbSize()];
+        break;
+    case 'session-write':
+        verify(session_start(), 'Could not start a Redis session');
+        $_SESSION['probe'] = 'cloud-php86-ffi';
+        $result = ['id' => session_id()];
+        verify(session_write_close(), 'Could not persist the synthetic Redis session');
+        break;
+    case 'session-read':
+        $id = getenv('MAHO_CLOUD_PROBE_SESSION') ?: '';
+        verify($id !== '' && session_id($id) !== false && session_start(), 'Could not reopen the synthetic session');
+        verify(session_id() === $id && ($_SESSION['probe'] ?? null) === 'cloud-php86-ffi', 'Redis session was not resumed');
+        verify(session_destroy(), 'Could not delete the synthetic session');
+        $redis = redisConnection();
+        verify($redis->select(1) && $redis->dbSize() === 0, 'Redis session database is not empty');
+        $result = ['session_resumed' => true, 'session_keys_remaining' => $redis->dbSize()];
+        break;
+    default:
+        throw new LogicException('Unknown test stage');
+}
+
+echo json_encode($result, JSON_THROW_ON_ERROR), PHP_EOL;

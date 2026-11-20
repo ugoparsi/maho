@@ -143,12 +143,19 @@ PY
         dockerfile="$proof_dir/cloud/Dockerfile"
         candidate="$proof_dir/cloud-redis.Dockerfile"
         test "$(grep -c 'openssl redis session' "$dockerfile")" = 1
+        test "$(grep -c 'spl zlib ffi vips' "$dockerfile")" = 1
+        test "$(grep -c 'openssh-server rsync' "$dockerfile")" = 1
         sed -e 's;^RUN install-php-extensions gd;RUN --mount=type=bind,from=phpredis-source,target=/tmp/phpredis,rw install-php-extensions gd;' \
-            -e 's;openssl redis session;openssl /tmp/phpredis session;' "$dockerfile" > "$candidate"
+            -e 's;openssl redis session;openssl /tmp/phpredis session;' \
+            -e 's;spl zlib ffi vips;spl zlib ffi;' \
+            -e 's;openssh-server rsync;openssh-server rsync libvips42t64;' "$dockerfile" > "$candidate"
         diff -u "$dockerfile" "$candidate" || test "$?" = 1
         original="$proof_dir/cloud/tests/image.sh"
         offline="$proof_dir/cloud-image-offline.sh"
-        sed 's/docker run --rm/docker run --network none --rm/' "$original" > "$offline"
+        sed -e 's/docker run --rm/docker run --network none --rm/' \
+            -e 's/mbstring FFI vips/mbstring FFI/' \
+            -e 's/for pkg in libgbm1 libnss3 fonts-liberation;/for pkg in libgbm1 libnss3 fonts-liberation libvips42t64;/' \
+            "$original" > "$offline"
         diff -u "$original" "$offline" || test "$?" = 1
         for engine in sqlite mysql pgsql; do
             image="maho-php86-proof:cloud-$engine"
@@ -159,9 +166,12 @@ PY
             inspect_image "$image"
             bash "$offline" "$image" "$engine"
         done
+        for engine in sqlite mysql pgsql; do
+            bash .github/scripts/cloud-php86-runtime.sh "maho-php86-proof:cloud-$engine" "$engine"
+        done
         ;;
     cleanup)
-        docker rm -fv "$test_container" >/dev/null 2>&1 || true
+        docker rm -fv "$test_container" maho-php86-cloud-web-proof maho-php86-redis-proof >/dev/null 2>&1 || true
         test -z "$(docker ps -aq --filter "label=$label")"
         echo 'Verification containers removed.'
         ;;
