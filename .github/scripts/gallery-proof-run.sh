@@ -33,16 +33,18 @@ sha256sum app/etc/local.xml var/db/maho.sqlite > "$proof/installed-hashes"
 cp "$log" "$proof/install-guard.jsonl"
 export MAHO_LOCALE_PROOF_RECEIPT="$proof/native-guard.jsonl"
 cp app/Mage.php "$proof/Mage.candidate.php.source"
-git show HEAD~3:app/Mage.php > "$proof/Mage.baseline.php.source"
+git show HEAD~4:app/Mage.php > "$proof/Mage.baseline.php.source"
 cp "$proof/Mage.baseline.php.source" app/Mage.php
 if timeout 45 php vendor/bin/pest --filter 'dispatches within the current transaction after resetting Mage' \
     --log-junit "$proof/queue-baseline.xml" tests/Backend/Integration/Queue/DbTransportTest.php; then
     echo 'Expected the baseline transaction assertion to fail'
     exit 1
 else
-    test "$?" -eq 1
+    baseline_exit=$?
+    echo "Queue rollback baseline exit $baseline_exit"
+    test "$baseline_exit" -eq 1
 fi
-grep -q '"phase":"queue_after_rollback_idle"' "$MAHO_LOCALE_PROOF_RECEIPT"
+grep -q '"phase":"queue_after_reset_idle"' "$MAHO_LOCALE_PROOF_RECEIPT"
 mv "$MAHO_LOCALE_PROOF_RECEIPT" "$proof/queue-baseline-guard.jsonl"
 cp "$proof/Mage.candidate.php.source" app/Mage.php
 test "$(git hash-object app/Mage.php)" = "$(git rev-parse HEAD:app/Mage.php)"
@@ -58,14 +60,15 @@ proof = Path(sys.argv[1])
 for variant in ('baseline', 'candidate'):
     root = ET.parse(proof / f'queue-{variant}.xml').getroot()
     cases = root.findall('.//testcase')
-    assert len(cases) == 1 and cases[0].attrib['assertions'] == '2'
+    expected_assertions = '1' if variant == 'baseline' else '3'
+    assert len(cases) == 1 and cases[0].attrib['assertions'] == expected_assertions
     failure = cases[0].find('failure')
     assert cases[0].find('error') is None and cases[0].find('skipped') is None
     if variant == 'baseline':
-        assert failure is not None and 'Failed asserting that two arrays are identical.' in failure.text
+        assert failure is not None and 'Failed asserting that true is false.' in failure.text
     else:
         assert failure is None
-    print(f'Queue rollback {variant}: 1 test, 2 assertions, expected result')
+    print(f'Queue rollback {variant}: 1 test, {expected_assertions} assertions, expected result')
 PY
 mv "$MAHO_LOCALE_PROOF_RECEIPT" "$proof/queue-candidate-guard.jsonl"
 test ! -e var/db/maho.sqlite-wal

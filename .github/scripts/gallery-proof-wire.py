@@ -46,7 +46,7 @@ update('lib/Maho/Db/Adapter/Pdo/Sqlite.php', time_adapter)
 def guard_queue_regression(source):
     for anchor, phase in (
         ('    QueueManager::reset();\n    clearQueueTable();', 'queue_before_fixture_write'),
-        ("    $resource = Mage::getResourceSingleton('core/config');", 'queue_after_reset_idle'),
+        ('    expect(QueueManager::dbTransport() === $previousTransport)->toBeFalse();', 'queue_after_reset_idle'),
         ('    expect(fetchQueueRows())->toBe([]);', 'queue_after_rollback_idle'),
     ):
         assert source.count(anchor) == 1
