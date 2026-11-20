@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 3
+          fetch-depth: 4
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.6'
@@ -39,15 +39,15 @@ jobs:
           set -euo pipefail
           adapter=lib/Maho/Db/Adapter/Pdo/Pgsql.php
           root=$(pwd -P)
-          test "$(git rev-parse HEAD^^)" = a1a13f0c6b069785490b09650957d2936df15a75
-          test "$(git rev-parse HEAD:composer.lock)" = "$(git rev-parse HEAD^^:composer.lock)"
+          test "$(git rev-parse HEAD~3)" = a1a13f0c6b069785490b09650957d2936df15a75
+          test "$(git rev-parse HEAD:composer.lock)" = "$(git rev-parse HEAD~3:composer.lock)"
           test ! -e app/etc/local.xml
           test ! -e vendor
           php -r 'exit(PHP_VERSION === "8.6.0" && extension_loaded("pdo_pgsql") ? 0 : 1);'
           composer install --no-dev --no-scripts --no-plugins --prefer-dist --no-progress --ignore-platform-req=ext-*
           test "$(realpath vendor)" = "$root/vendor"
-          git show "HEAD^^:$adapter" > "$RUNNER_TEMP/Pgsql-baseline.php.source"
-          test "$(git hash-object "$RUNNER_TEMP/Pgsql-baseline.php.source")" = "$(git rev-parse "HEAD^^:$adapter")"
+          git show "HEAD~3:$adapter" > "$RUNNER_TEMP/Pgsql-baseline.php.source"
+          test "$(git hash-object "$RUNNER_TEMP/Pgsql-baseline.php.source")" = "$(git rev-parse "HEAD~3:$adapter")"
           test "$(git hash-object "$adapter")" = "$(git rev-parse "HEAD:$adapter")"
           python3 - <<'PY'
           from pathlib import Path

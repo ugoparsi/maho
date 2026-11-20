@@ -47,7 +47,9 @@ function verifyNoApp(): void
 }
 verify(!is_file($root . '/app/etc/local.xml'), 'Unexpected Maho configuration.');
 require $root . '/vendor/autoload.php';
+require $root . '/app/Mage.php';
 require $adapterFile;
+verify(new ReflectionClass(Mage::class)->getFileName() === $root . '/app/Mage.php', 'Wrong Mage root.');
 verifyNoApp();
 verify(new ReflectionClass(Pgsql::class)->getFileName() === $adapterFile, 'Wrong adapter loaded.');
 $guardFile = $root . '/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php';
