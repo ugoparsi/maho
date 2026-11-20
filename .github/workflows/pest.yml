@@ -82,7 +82,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
+          fetch-depth: 4
 
       - name: Get composer cache directory
         id: composer-cache
@@ -106,8 +106,11 @@ jobs:
           DB_ENGINE: ${{ matrix.db_engine }}
           DB_ID: ${{ job.services.db.id }}
         run: |
-          test "$(git rev-parse HEAD^)" = 2ba5e45ebd181ce46ab0c9e943a674bf6667b75b
-          test -z "$(git diff --name-only HEAD^ HEAD -- . ':!.github/workflows/pest.yml' ':!.github/scripts/php86-server-delta.php.source')"
+          test "$(git rev-parse HEAD~2)" = 2ba5e45ebd181ce46ab0c9e943a674bf6667b75b
+          test "$(git rev-parse HEAD~3)" = 231a2fa8d699a8dd93438cc8087db1b2275d279b
+          test -z "$(git diff --name-only HEAD~2 HEAD -- . ':!.github/workflows/pest.yml' ':!.github/scripts/php86-server-delta.php.source')"
+          git show HEAD~3:app/code/core/Mage/Bundle/Model/Resource/Option.php > "$RUNNER_TEMP/reference-option.php.source"
+          test "$(git hash-object "$RUNNER_TEMP/reference-option.php.source")" = fa8e3b3f29588c94863c8e9c8ae6a7e2a50c8c6a
           test ! -e app/etc/local.xml
           test "$(realpath vendor)" = "$GITHUB_WORKSPACE/vendor"
           test "$(git hash-object composer.lock)" = dd48e3d83fc35b4f8e11be89f7a4b8e3bbc3bdc8
@@ -211,7 +214,7 @@ jobs:
           test "$(git hash-object "$test_path")" = 7bc7abe842a3a4528aac319e3e63bb8f58b42c08
           cp "$resource" "$RUNNER_TEMP/proposed-option.php.source"
           trap 'cp "$RUNNER_TEMP/proposed-option.php.source" "$resource"' EXIT
-          git show "231a2fa8d699a8dd93438cc8087db1b2275d279b:$resource" > "$resource"
+          cp "$RUNNER_TEMP/reference-option.php.source" "$resource"
           if php vendor/bin/pest --colors=never --fail-on-skipped \
               --log-junit "$RUNNER_TEMP/bundle-reference.xml" "$test_path"; then
             exit 1
