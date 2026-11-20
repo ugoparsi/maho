@@ -1,0 +1,98 @@
+name: PHP 8.6 PostgreSQL upsert verification
+
+on:
+  push:
+    branches: [verify/pgsql-upsert-native-20261120]
+
+permissions:
+  contents: read
+
+jobs:
+  upsert:
+    if: github.repository == 'ugoparsi/maho'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: upsert-fixture-only
+          POSTGRES_DB: maho_upsert_proof
+        ports:
+          - 127.0.0.1:55431:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d maho_upsert_proof"
+          --health-interval=2s
+          --health-timeout=3s
+          --health-retries=15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 3
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.6'
+          extensions: pdo_pgsql
+          coverage: none
+      - name: Prepare owned adapter and dependency files
+        run: |
+          set -euo pipefail
+          adapter=lib/Maho/Db/Adapter/Pdo/Pgsql.php
+          root=$(pwd -P)
+          test "$(git rev-parse HEAD^^)" = a1a13f0c6b069785490b09650957d2936df15a75
+          test "$(git rev-parse HEAD:composer.lock)" = "$(git rev-parse HEAD^^:composer.lock)"
+          test ! -e app/etc/local.xml
+          test ! -e vendor
+          php -r 'exit(PHP_VERSION === "8.6.0" && extension_loaded("pdo_pgsql") ? 0 : 1);'
+          composer install --no-dev --no-scripts --no-plugins --prefer-dist --no-progress --ignore-platform-req=ext-*
+          test "$(realpath vendor)" = "$root/vendor"
+          git show "HEAD^^:$adapter" > "$RUNNER_TEMP/Pgsql-baseline.php.source"
+          test "$(git hash-object "$RUNNER_TEMP/Pgsql-baseline.php.source")" = "$(git rev-parse "HEAD^^:$adapter")"
+          test "$(git hash-object "$adapter")" = "$(git rev-parse "HEAD:$adapter")"
+          python3 - <<'PY'
+          from pathlib import Path
+          from hashlib import sha256
+          f = Path('vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php')
+          source = f.read_text()
+          before = '    ): PDO {\n'
+          assert source.count(before) == 1
+          successor = source.replace(before, before + '        \\mahoUpsertBeforePdo($dsn, $username);\n')
+          print('PDOConnect before:', sha256(source.encode()).hexdigest())
+          f.write_text(successor)
+          print('PDOConnect guarded:', sha256(successor.encode()).hexdigest())
+          PY
+      - name: Verify and time real upserts
+        run: |
+          set -euo pipefail
+          php --version
+          python3 - <<'PY'
+          import json, os, statistics, subprocess
+          from pathlib import Path
+          root = Path.cwd().resolve()
+          main = 'lib/Maho/Db/Adapter/Pdo/Pgsql.php'
+          files = {'baseline': str(Path(os.environ['RUNNER_TEMP']) / 'Pgsql-baseline.php.source'), 'candidate': str(root / main)}
+          probe = str(root / '.github/scripts/php86-upsert-proof.php.source')
+          for column_type in ('text','bytea'):
+              pairs = []
+              for num in range(7):
+                  pair = {}
+                  for side in (('baseline','candidate') if num % 2 == 0 else ('candidate','baseline')):
+                      result = subprocess.run(['php', '-d', 'error_reporting=-1', probe, str(root), files[side], column_type], capture_output=True, text=True, timeout=20)
+                      if result.stderr or result.returncode:
+                          raise RuntimeError((side, result.returncode, result.stdout, result.stderr))
+                      pair[side] = json.loads(result.stdout)
+                  assert pair['baseline']['digest'] == pair['candidate']['digest']
+                  assert all(row['rows'] == 500 and row['clean'] for row in pair.values())
+                  assert pair['baseline']['adapter_blob'] != pair['candidate']['adapter_blob']
+                  pairs.append(pair)
+              medians = {side: statistics.median(statistics.median(pair[side]['ns']) for pair in pairs) / 1e6 for side in files}
+              print('UPSERT_RECEIPT ' + json.dumps({'type': column_type, 'median_ms': medians, 'pairs': pairs}))
+          PY
+      - name: Check fixture and connection cleanup
+        if: always()
+        env:
+          DATABASE_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          test "$(docker exec "$DATABASE_CONTAINER" psql -U postgres -d maho_upsert_proof -tAc "SELECT count(*) FROM pg_tables WHERE schemaname='public'")" = 0
+          test "$(docker exec "$DATABASE_CONTAINER" psql -U postgres -d maho_upsert_proof -tAc "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()")" = 0

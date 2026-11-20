@@ -1,0 +1,128 @@
+<?php
+
+declare(strict_types=1);
+
+use Maho\Db\Adapter\Pdo\Pgsql;
+use Maho\Db\Expr;
+
+[$script, $root, $adapterFile, $type] = $argv;
+if (realpath($root) !== $root || realpath($adapterFile) !== $adapterFile || !in_array($type, ['text', 'bytea'], true)) {
+    throw new LogicException('Unexpected source or fixture type.');
+}
+
+function verify(bool $valid, string $failure): void
+{
+    if (!$valid) {
+        throw new LogicException($failure);
+    }
+}
+
+$opens = 0;
+function mahoUpsertBeforePdo(string $dsn, string $user): void
+{
+    global $opens;
+    verify(str_starts_with($dsn, 'pgsql:'), 'Wrong database driver.');
+    $config = [];
+    foreach (explode(';', substr($dsn, 6)) as $param) {
+        if ($param !== '') {
+            [$name, $value] = explode('=', $param, 2);
+            $config[$name] = $value;
+        }
+    }
+    verify(
+        ($config['host'] ?? null) === '127.0.0.1' && ($config['port'] ?? null) === '55431'
+        && ($config['dbname'] ?? null) === 'maho_upsert_proof' && $user === 'postgres',
+        'The PDO connection is outside the fixture.',
+    );
+    $opens++;
+}
+
+function verifyNoApp(): void
+{
+    if (class_exists('Mage', false)) {
+        foreach (['_app', '_config'] as $field) {
+            verify(new ReflectionProperty(Mage::class, $field)->getValue() === null, 'An application unexpectedly initialized.');
+        }
+    }
+}
+verify(!is_file($root . '/app/etc/local.xml'), 'Unexpected Maho configuration.');
+require $root . '/vendor/autoload.php';
+require $adapterFile;
+verifyNoApp();
+verify(new ReflectionClass(Pgsql::class)->getFileName() === $adapterFile, 'Wrong adapter loaded.');
+$guardFile = $root . '/vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php';
+verify(new ReflectionClass(Doctrine\DBAL\Driver\PDO\PDOConnect::class)->getFileName() === $guardFile, 'Wrong DBAL root.');
+
+$adapter = new Pgsql([
+    'host' => '127.0.0.1', 'port' => 55431, 'dbname' => 'maho_upsert_proof',
+    'username' => 'postgres', 'password' => 'upsert-fixture-only', 'sslmode' => 'disable',
+]);
+$db = $adapter->getConnection();
+$pdo = $db->getNativeConnection();
+$identity = $db->fetchAssociative('SELECT current_database() AS db, current_user AS owner, inet_server_port() AS port, version() AS version');
+verify($opens === 1 && $identity['db'] === 'maho_upsert_proof' && $identity['owner'] === 'postgres' && (int) $identity['port'] === 5432, 'Wrong opened database.');
+$checkIdle = static function () use ($adapter, $db, $pdo): void {
+    verify($adapter->getTransactionLevel() === 0 && $db->getTransactionNestingLevel() === 0 && !$pdo->inTransaction(), 'Unexpected open transaction.');
+    verifyNoApp();
+};
+$checkIdle();
+$table = 'php86_upsert_fixture';
+verify($db->fetchOne("SELECT to_regclass('public.php86_upsert_fixture')") === null, 'Fixture already exists.');
+$db->executeStatement("CREATE TABLE $table (sku VARCHAR(16) PRIMARY KEY, label VARCHAR(20), payload $type, store INTEGER, status INTEGER, note VARCHAR(20))");
+try {
+    $rows = [];
+    $expected = [];
+    for ($i = 0; $i < 500; $i++) {
+        $sku = sprintf('sku%04d', $i);
+        $payload = $type === 'bytea' ? "\x00\xFE" . $i : 'text-' . $i;
+        $note = $i % 4 === 0 ? null : 'note';
+        $rows[] = [
+            'sku' => $sku, 'label' => 'target', 'payload' => $payload, 'store' => 2,
+            'status' => $i % 3 === 0 ? new Expr('3 + 1') : 1, 'note' => $note,
+        ];
+        $expected[] = [
+            'sku' => $sku, 'label' => 'target', 'payload' => $type === 'bytea' ? bin2hex($payload) : $payload,
+            'store' => 2, 'status' => $i % 3 === 0 ? 4 : 1, 'note' => $note,
+        ];
+    }
+    $columns = ['label', 'payload', 'store', 'status', 'note'];
+    verify($adapter->insertOnDuplicate($table, $rows, $columns) === 500, 'Initial insert count mismatch.');
+    verify($adapter->lastInsertId() === 'sku0000', 'Initial RETURNING mismatch.');
+    $edited = $rows;
+    $edited[0]['label'] = 'updated';
+    $edited[1]['status'] = 5;
+    $expected[0]['label'] = 'updated';
+    $expected[1]['status'] = 5;
+    verify($adapter->insertOnDuplicate($table, $edited, $columns) === 500, 'Conflict update count mismatch.');
+    $payloadSelect = $type === 'bytea' ? "encode(payload, 'hex') AS payload" : 'payload';
+    $select = "SELECT sku,label,$payloadSelect,store,status,note FROM $table ORDER BY sku";
+    $readRows = static fn (): array => array_map(static function (array $row): array {
+        foreach (['store', 'status'] as $column) {
+            $row[$column] = (int) $row[$column];
+        }
+        return $row;
+    }, $db->fetchAllAssociative($select));
+    verify($readRows() === $expected, 'Persisted update values do not match.');
+    $times = [];
+    for ($i = 0; $i < 5; $i++) {
+        $before = hrtime(true);
+        $affected = $adapter->insertOnDuplicate($table, $edited, $columns);
+        $times[] = hrtime(true) - $before;
+        verify($affected === 500, 'Repeated update count mismatch.');
+    }
+    $result = $readRows();
+    verify($result === $expected, 'Persisted result changed during timing.');
+    $digest = hash('sha256', serialize($result));
+    $checkIdle();
+} finally {
+    $db->executeStatement("DROP TABLE $table");
+    verify($db->fetchOne("SELECT to_regclass('public.php86_upsert_fixture')") === null, 'Fixture cleanup failed.');
+    $checkIdle();
+    $adapter->closeConnection();
+    unset($checkIdle, $pdo);
+}
+verify(!$db->isConnected() && $opens === 1, 'Connection cleanup failed.');
+echo json_encode([
+    'php' => PHP_VERSION, 'database_version' => $identity['version'], 'adapter_blob' => sha1('blob ' . filesize($adapterFile) . "\x00" . file_get_contents($adapterFile)),
+    'type' => $type, 'rows' => count($result), 'digest' => $digest, 'ns' => $times, 'clean' => true,
+], JSON_THROW_ON_ERROR), PHP_EOL;
