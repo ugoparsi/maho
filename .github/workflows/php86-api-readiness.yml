@@ -30,13 +30,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 3
+          fetch-depth: 5
 
       - name: Install locked dependencies
         run: |
           source=231a2fa8d699a8dd93438cc8087db1b2275d279b
-          test "$(git rev-parse HEAD~2)" = "$source"
-          test -z "$(git diff --name-only "$source" HEAD -- . ':(exclude).github/workflows/php86-api-readiness.yml' ':(exclude).github/scripts/php86-api-readiness-*')"
+          test "$(git rev-parse HEAD~4)" = "$source"
+          test -z "$(git diff --name-only "$source" HEAD -- . ':(exclude).github/workflows/php86-api-readiness.yml' ':(exclude).github/scripts/php86-api-readiness-*' ':(exclude)tests/Pest.php' ':(exclude)tests/Helpers/ApiV2Helper.php')"
+          test "$(git hash-object tests/Pest.php)" = 695eaf060249b1bd91941ab9f5f96e8d4e8945c5
+          test "$(git hash-object tests/Helpers/ApiV2Helper.php)" = 7e76b4cecb0bf02cc66ebecd7fc13500cd45c508
           test ! -e app/etc/local.xml
           test "$(git hash-object composer.lock)" = dd48e3d83fc35b4f8e11be89f7a4b8e3bbc3bdc8
           composer install --prefer-dist --no-interaction --no-progress
@@ -106,5 +108,5 @@ jobs:
           php maho config:set apiplatform/oauth2/secret 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef --encrypt --scope default --scope-id 0 --silent
           php maho cache:flush
 
-      - name: Compare the cold start with both cURL deadlines
+      - name: Run the SOAP and REST cache tests with the shared readiness check
         run: python3 .github/scripts/php86-api-readiness-proof.py
