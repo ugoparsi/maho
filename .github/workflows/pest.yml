@@ -1,9 +1,9 @@
-name: PHP 8.6 merged changes on server databases
+name: PHP 8.6 OAuth on server databases
 
 on:
   push:
     branches:
-      - verify/php86-post-merge-server-20261120
+      - verify/php86-post-merge-oauth-20261120
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,7 +15,7 @@ permissions:
 jobs:
   pest-db:
     if: ${{ github.repository == 'ugoparsi/maho' }}
-    name: Merged changes (${{ matrix.db_image }})
+    name: OAuth (${{ matrix.db_image }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -130,8 +130,8 @@ jobs:
           DB_ENGINE: ${{ matrix.db_engine }}
           DB_ID: ${{ job.services.db.id }}
         run: |
-          test "$(git rev-parse HEAD^)" = fe945df8ed03e26a9242bec2aff2e4c4f91693ed
-          test -z "$(git diff --name-only HEAD^ HEAD -- . ':!.github/workflows/pest.yml' ':!.github/scripts/php86-server-delta.php.source')"
+          test "$(git rev-parse HEAD^^)" = fe945df8ed03e26a9242bec2aff2e4c4f91693ed
+          test -z "$(git diff --name-only HEAD^^ HEAD -- . ':!.github/workflows/pest.yml' ':!.github/scripts/php86-server-delta.php.source')"
           test ! -e app/etc/local.xml
           test "$(realpath vendor)" = "$GITHUB_WORKSPACE/vendor"
           test "$(git hash-object composer.lock)" = dd48e3d83fc35b4f8e11be89f7a4b8e3bbc3bdc8
@@ -170,7 +170,16 @@ jobs:
           old = r'        \Mage::app();' + chr(10) + r"        $config = \Mage::getModel('core/config');" + chr(10)*2 + '        $protocols = '
           assert source.count(old) == 1
           guard = r"        \mahoServerDeltaObserveIdle('api_before_fixtures');"
-          f.write_text(source.replace(old, old.replace(chr(10), chr(10) + guard + chr(10), 1)))
+          source = source.replace(old, old.replace(chr(10), chr(10) + guard + chr(10), 1))
+          mark = "        $protocolsEnabled = true;"
+          assert source.count(mark) == 1
+          warm = r'''        $readiness = curl_init('http://127.0.0.1:8901/api/rest/v2/store-config');
+                  curl_setopt_array($readiness, [CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 2, CURLOPT_TIMEOUT => 25]);
+                  curl_exec($readiness);
+                  $status = curl_getinfo($readiness, CURLINFO_HTTP_CODE);
+                  mahoServerDeltaRecord('oauth_api_ready', ['status' => $status, 'seconds' => curl_getinfo($readiness, CURLINFO_TOTAL_TIME)]);
+                  mahoServerDeltaRequire($status === 200, 'The owned API must respond before OAuth tests');'''
+          f.write_text(source.replace(mark, warm + chr(10) + mark))
           PYCODE
           php -l "$pdo_file"
           echo "PDO hook $pdo_before -> $(git hash-object "$pdo_file")"
@@ -249,29 +258,22 @@ jobs:
           cat "$RUNNER_TEMP/maho-server.log"
           exit 1
 
-      - name: Run current-source cases
+      - name: Run OAuth cases
         run: |
           set -euo pipefail
           php --version
           grep -q '"phase":"before_open"' "$MAHO_SERVER_LOG"
           grep -q '"phase":"opened"' "$MAHO_SERVER_LOG"
           grep -q '"phase":"first_adapter_query"' "$MAHO_SERVER_LOG"
-          for test_file in \
-            tests/Backend/Integration/CatalogRule/IndexAggregationTest.php \
-            tests/Backend/Integration/Dataflow/AdvancedProfileSaveTest.php \
-            tests/Backend/Unit/Core/Helper/UnserializeArrayTest.php \
-            tests/Backend/Unit/Install/InstallerDatabaseExtensionsTest.php \
-            tests/Api/V2/Write/OauthAuthorizationCodeTest.php
-          do
-            php vendor/bin/pest \
-              --display-errors --display-warnings --exclude-group=currency-live --exclude-group=sandbox "$test_file" | tee -a "$RUNNER_TEMP/maho-focused-tests.log"
-          done
+          php vendor/bin/pest \
+            --display-errors --display-warnings --exclude-group=currency-live --exclude-group=sandbox \
+            tests/Api/V2/Write/OauthAuthorizationCodeTest.php | tee "$RUNNER_TEMP/maho-focused-tests.log"
+          test "$(grep -cF '✓ OAuth authorization code flow →' "$RUNNER_TEMP/maho-focused-tests.log")" -eq 12
           if grep -F 'unserialize(): Error at offset 0 of 0 bytes' "$RUNNER_TEMP/maho-focused-tests.log" "$RUNNER_TEMP/maho-server.log"; then
             exit 1
           fi
-          for event in backend_ready backend_before_reset api_before_fixtures; do
-            grep -q "\"phase\":\"$event\"" "$MAHO_SERVER_LOG"
-          done
+          grep -q '"phase":"api_before_fixtures"' "$MAHO_SERVER_LOG"
+          grep -q '"phase":"oauth_api_ready","php":' "$MAHO_SERVER_LOG"
 
       - name: Stop loopback server
         if: always()
