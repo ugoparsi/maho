@@ -1,0 +1,26 @@
+name: PHP 8.6 activation diagnostic
+
+on:
+  push:
+    branches: [verify/php86-redis-startup-20261120]
+
+permissions:
+  contents: read
+
+jobs:
+  startup:
+    if: github.repository == 'ugoparsi/maho'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Setup PHP
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.6'
+          extensions: pdo_sqlite, redis
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Compare stock server startup without the application
+        run: python3 .github/scripts/php86-runtime-startup.py
