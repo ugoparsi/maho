@@ -30,12 +30,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
+          fetch-depth: 3
 
       - name: Install locked dependencies
         run: |
-          test "$(git rev-parse HEAD^)" = 231a2fa8d699a8dd93438cc8087db1b2275d279b
-          test -z "$(git diff --name-only HEAD^ HEAD -- . ':(exclude).github/workflows/php86-api-readiness.yml' ':(exclude).github/scripts/php86-api-readiness-*')"
+          source=231a2fa8d699a8dd93438cc8087db1b2275d279b
+          test "$(git rev-parse HEAD~2)" = "$source"
+          test -z "$(git diff --name-only "$source" HEAD -- . ':(exclude).github/workflows/php86-api-readiness.yml' ':(exclude).github/scripts/php86-api-readiness-*')"
           test ! -e app/etc/local.xml
           test "$(git hash-object composer.lock)" = dd48e3d83fc35b4f8e11be89f7a4b8e3bbc3bdc8
           composer install --prefer-dist --no-interaction --no-progress
@@ -70,7 +71,7 @@ jobs:
           change('lib/Maho/Db/Adapter/Pdo/Sqlite.php','            // Execute query using Doctrine DBAL',
                  r'            \localeProofBeforeQuery($this, $this->_connection);'+'\n            // Execute query using Doctrine DBAL')
           api='tests/Pest.php'
-          setup=r"        \Mage::app();" + chr(10) + "        $config = " + r"\Mage::getModel('core/config');"
+          setup=r"        \Mage::app();" + chr(10) + "        $config = " + r"\Mage::getModel('core/config');" + chr(10)*2 + '        $protocols = '
           change(api, setup, setup.replace(chr(10), chr(10) + "        " + r"\localeProofIdle('api_before_fixtures');" + chr(10), 1))
           PY
           guard="$GITHUB_WORKSPACE/.github/scripts/php86-api-readiness-guard.php.source"
@@ -104,7 +105,6 @@ jobs:
           php maho index:reindex:all
           php maho config:set apiplatform/oauth2/secret 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef --encrypt --scope default --scope-id 0 --silent
           php maho cache:flush
-
 
       - name: Compare the cold start with both cURL deadlines
         run: python3 .github/scripts/php86-api-readiness-proof.py

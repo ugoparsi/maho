@@ -19,6 +19,7 @@ original_setup = setup.read_text()
 test_file = 'tests/Api/Soap/SoapResponseTest.php'
 address = '127.0.0.1:18986'
 base_url = f'http://{address}'
+router = temp / 'api-proof-router.php'
 
 
 def assert_closed():
@@ -61,8 +62,8 @@ def run_probe(deadline):
     print(f'API_PROBE_BEGIN deadline={deadline} setup_sha256={fixture_hash(setup)}', flush=True)
     with server_log.open('x') as log:
         server = subprocess.Popen([
-            'php', '-d', 'opcache.enable_cli=1', '-d', 'opcache.validate_timestamps=1',
-            '-d', 'opcache.revalidate_freq=0', '-S', address, '-t', 'public', 'tests/router.php',
+            'php', '-d', 'auto_prepend_file=', '-d', 'opcache.enable_cli=1', '-d', 'opcache.validate_timestamps=1',
+            '-d', 'opcache.revalidate_freq=0', '-S', address, '-t', 'public', str(router),
         ], env=os.environ | {'PHP_CLI_SERVER_WORKERS': '8', 'MAHO_GRAPHQL_INTROSPECTION': '1'},
            stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
         try:
@@ -87,6 +88,8 @@ def run_probe(deadline):
     phases = {row['phase'] for row in records}
     assert {'prepend', 'before_pdo_open', 'pdo_opened', 'before_first_adapter_query', 'api_before_fixtures', 'shutdown_idle'} <= phases
     assert all(row['php'] == '8.6.0' for row in records)
+    requests = {row.get('request_path') for row in records if row['phase'] == 'prepend'}
+    assert '/api/rest/v2/store-config' in requests and (case.find('skipped') is not None or '/api/v2_soap' in requests)
     assert 'Unexpected' not in test.stderr + server_log.read_text()
     result = traces[0] | {
         'deadline': deadline, 'skipped': case.find('skipped') is not None,
@@ -102,6 +105,11 @@ assert root.resolve() == root and Path.cwd() == root
 assert (root / 'app/etc/local.xml').is_file() and not (root / 'app/etc/local.xml').is_symlink()
 assert os.environ['API_BASE_URL'] == base_url
 assert_closed()
+with router.open('x') as stream:
+    stream.write('''<?php
+require getenv('GITHUB_WORKSPACE') . '/.github/scripts/php86-api-readiness-guard.php.source';
+return require getenv('GITHUB_WORKSPACE') . '/tests/router.php';
+''')
 seed = temp / 'api-proof-closed-seed.sqlite'
 shutil.copyfile(db, seed)
 seed.chmod(0o400)
