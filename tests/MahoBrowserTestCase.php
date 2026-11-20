@@ -26,8 +26,12 @@ abstract class MahoBrowserTestCase extends MahoFrontendTestCase
             $this->markTestSkipped('Playwright is not installed');
         }
 
+        \galleryProofTiming('browser_setup_begin');
         parent::setUp();
+        \galleryProofTiming('browser_app_ready');
 
         MahoServer::start();
+        \localeProofRequireMageRoot();
+        \localeProofIdle('gallery_browser_setup_idle');
     }
 }

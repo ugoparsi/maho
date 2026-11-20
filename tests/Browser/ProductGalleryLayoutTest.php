@@ -15,22 +15,27 @@ uses(MahoBrowserTestCase::class)->group('browser');
 const GALLERY_IMAGE_COUNT = 4;
 
 afterEach(function () {
+    galleryProofTiming('after_each_start');
     $config = Mage::getModel('core/config');
     $config->deleteConfig(Mage_Catalog_Block_Product_View_Media::XML_PATH_GALLERY_LAYOUT);
     $config->deleteConfig(Mage_Catalog_Block_Product_View_Media::XML_PATH_GALLERY_GRID_COLUMNS);
     $config->deleteConfig(Mage_Catalog_Block_Product_View_Media::XML_PATH_GALLERY_PHONE_LAYOUT);
     Mage::app()->getStore()->resetConfig();
     Mage::app()->cleanCache();
+    galleryProofTiming('after_each_done');
 });
 
 function setGalleryLayout(string $layout, int $columns = 2, string $phoneLayout = 'carousel'): void
 {
+    localeProofIdle('before_gallery_config_write');
+    galleryProofTiming('gallery_config_start');
     $config = Mage::getModel('core/config');
     $config->saveConfig(Mage_Catalog_Block_Product_View_Media::XML_PATH_GALLERY_LAYOUT, $layout);
     $config->saveConfig(Mage_Catalog_Block_Product_View_Media::XML_PATH_GALLERY_GRID_COLUMNS, (string) $columns);
     $config->saveConfig(Mage_Catalog_Block_Product_View_Media::XML_PATH_GALLERY_PHONE_LAYOUT, $phoneLayout);
     Mage::app()->getStore()->resetConfig();
     Mage::app()->cleanCache();
+    galleryProofTiming('gallery_config_done');
 }
 
 /**
@@ -39,6 +44,8 @@ function setGalleryLayout(string $layout, int $columns = 2, string $phoneLayout 
  */
 function galleryProductUrl(): string
 {
+    localeProofIdle('before_gallery_product_write');
+    galleryProofTiming('fixture_start');
     $dir = Mage::getBaseDir('var') . '/tmp/gallery-layout-test';
     @mkdir($dir, 0777, true);
 
@@ -61,7 +68,10 @@ function galleryProductUrl(): string
         $product->addImageToMediaGallery($file, $i === 0 ? ['image', 'small_image', 'thumbnail'] : null, false, false);
     }
 
+    galleryProofTiming('before_product_save');
     $product->save();
+    galleryProofTiming('product_saved');
+    localeProofIdle('fixture_commit_idle');
 
     return '/catalog/product/view/id/' . (int) $product->getId() . '/';
 }
@@ -72,7 +82,9 @@ it('shows every gallery image in the grid layout', function () {
     setGalleryLayout('grid', 2);
 
     $page = visit(MahoServer::baseUrl() . galleryProductUrl());
+    galleryProofTiming('navigation_returned');
     waitForPageLoad($page, '.product-image-gallery');
+    galleryProofTiming('page_ready');
 
     expect($page->script(VISIBLE_GALLERY_IMAGES))->toBe(GALLERY_IMAGE_COUNT)
         ->and($page->script("getComputedStyle(document.querySelector('.more-views')).display"))->toBe('none')
@@ -87,7 +99,9 @@ it('shows one image and the thumbnails at its left in the left layout', function
     setGalleryLayout('left');
 
     $page = visit(MahoServer::baseUrl() . galleryProductUrl());
+    galleryProofTiming('navigation_returned');
     waitForPageLoad($page, '.product-image-thumbs');
+    galleryProofTiming('page_ready');
 
     expect($page->script(VISIBLE_GALLERY_IMAGES))->toBe(1)
         ->and($page->script(

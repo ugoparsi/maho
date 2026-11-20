@@ -1,0 +1,29 @@
+<?php
+
+declare(strict_types=1);
+
+define('MAHO_ROOT_DIR', LOCALE_PROOF_ROOT);
+define('MAHO_PUBLIC_DIR', LOCALE_PROOF_ROOT . '/public');
+require LOCALE_PROOF_ROOT . '/vendor/autoload.php';
+require_once LOCALE_PROOF_ROOT . '/app/bootstrap.php';
+
+if (Maho::getBasePath() !== LOCALE_PROOF_ROOT || BP !== LOCALE_PROOF_ROOT || Mage::getConfig() !== null) {
+    throw new LogicException('Starter root not isolated or Mage initialized unexpectedly.');
+}
+
+$files = [];
+foreach ([
+    Mage::class => 'app/Mage.php',
+    Mage_Core_Model_App::class => 'app/code/core/Mage/Core/Model/App.php',
+    Mage_Core_Model_Resource::class => 'app/code/core/Mage/Core/Model/Resource.php',
+    Mage_Core_Helper_String::class => 'app/code/core/Mage/Core/Helper/String.php',
+    Maho\Db\Adapter\Pdo\Sqlite::class => 'lib/Maho/Db/Adapter/Pdo/Sqlite.php',
+    Doctrine\DBAL\DriverManager::class => 'vendor/doctrine/dbal/src/DriverManager.php',
+] as $class => $relative) {
+    $file = (new ReflectionClass($class))->getFileName();
+    if ($file !== LOCALE_PROOF_ROOT . '/' . $relative || realpath($file) !== $file) {
+        throw new LogicException('Unexpected class path for ' . $class);
+    }
+    $files[$class] = ['path' => $file, 'sha256' => hash_file('sha256', $file)];
+}
+echo json_encode(['php' => PHP_VERSION, 'maho' => Mage::getVersion(), 'root' => BP, 'classes' => $files], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR), PHP_EOL;
