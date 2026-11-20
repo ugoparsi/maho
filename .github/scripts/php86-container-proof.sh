@@ -123,6 +123,23 @@ case "${1:?verification stage}" in
         git -C "$checkout/liblzf" archive HEAD | tar -xf - -C "$bundle/liblzf"
         test -s "$bundle/liblzf/LICENSE"
         printf 'PhpRedis source %s with liblzf %s\n' "$redis_ref" "$redis_lzf"
+        cp "$bundle/package.xml" "$proof_dir/phpredis-package-before.xml"
+        python3 - "$bundle/package.xml" <<'PY'
+from pathlib import Path
+import sys
+
+package = Path(sys.argv[1])
+lines = package.read_text().splitlines(keepends=True)
+phpser = next(line for line in lines if 'name="enable-redis-phpser"' in line)
+liblz4 = next(line for line in lines if 'name="with-liblz4"' in line)
+assert 'default="no"' in phpser and lines.index(phpser) < lines.index(liblz4)
+# The installed IPE answers PECL's six existing prompts positionally.
+# Keep those positions and let the new optional serializer take its default.
+lines.remove(phpser)
+lines.insert(lines.index(liblz4) + 1, phpser)
+package.write_text(''.join(lines))
+PY
+        diff -u "$proof_dir/phpredis-package-before.xml" "$bundle/package.xml" || test "$?" = 1
         dockerfile="$proof_dir/cloud/Dockerfile"
         candidate="$proof_dir/cloud-redis.Dockerfile"
         test "$(grep -c 'openssl redis session' "$dockerfile")" = 1
