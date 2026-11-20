@@ -8,6 +8,7 @@ franken_ref=894fde1cd7bf1f7324a27776952da849cd7d2c3e
 maho_images_ref=35aeff87ea03d36e87176a7d865144f37d2c25c8
 cloud_ref=be56e8508942c32833a81c5c1a6321a8ac8330c3
 redis_ref=a6ce1e60b3e81ce3b25174aa5aaefd5590dc64fd
+redis_lzf=fb25820c3c0aeafd127956ae6c115063b47e459a
 php_base='docker-image://docker.io/library/php@sha256:d84acf3155d907afaa5afa9b9457c5f12016b6dc7ade84659f40cdc505cc087d'
 go_base='docker-image://docker.io/library/golang@sha256:f18c3d73a184fb0582828510722e723b63a93f7188d11dd223d9be6f6880e65d'
 base_tag=dunglas/frankenphp:php8.6-trixie
@@ -22,7 +23,9 @@ fetch_source() {
     git -C "$target" checkout --quiet --detach FETCH_HEAD
     test "$(git -C "$target" rev-parse HEAD)" = "$revision"
     git -C "$target" log -1 --format='%H %s'
-    sha256sum "$target/Dockerfile"
+    if [[ -f "$target/Dockerfile" ]]; then
+        sha256sum "$target/Dockerfile"
+    fi
 }
 
 inspect_image() {
@@ -77,8 +80,10 @@ case "${1:?verification stage}" in
         fetch_source MahoCommerce/mahocloud-docker-images "$cloud_ref" "$proof_dir/cloud"
         ;;
     frankenphp)
+        test -n "${GITHUB_TOKEN:?read-only Actions token required by the upstream recipe}"
         docker buildx build --builder default --platform "$platform" --load --progress plain \
             --build-context "php-base=$php_base" --build-context "golang-base=$go_base" \
+            --secret id=github-token,env=GITHUB_TOKEN \
             --target runner --build-arg "FRANKENPHP_VERSION=proof-$franken_ref" \
             --tag "$base_tag" "$proof_dir/frankenphp"
         inspect_image "$base_tag"
@@ -106,10 +111,23 @@ case "${1:?verification stage}" in
         serve_probe "$maho_tag"
         ;;
     cloud)
+        checkout="$proof_dir/phpredis"
+        bundle="$proof_dir/phpredis-source"
+        fetch_source phpredis/phpredis "$redis_ref" "$checkout"
+        test "$(git -C "$checkout" config -f .gitmodules --get submodule.liblzf.url)" = 'https://github.com/nemequ/liblzf.git'
+        test "$(git -C "$checkout" rev-parse HEAD:liblzf)" = "$redis_lzf"
+        git -C "$checkout" submodule update --init --depth=1 -- liblzf
+        test "$(git -C "$checkout/liblzf" rev-parse HEAD)" = "$redis_lzf"
+        mkdir -p "$bundle/liblzf"
+        git -C "$checkout" archive HEAD | tar -xf - -C "$bundle"
+        git -C "$checkout/liblzf" archive HEAD | tar -xf - -C "$bundle/liblzf"
+        test -s "$bundle/liblzf/LICENSE"
+        printf 'PhpRedis source %s with liblzf %s\n' "$redis_ref" "$redis_lzf"
         dockerfile="$proof_dir/cloud/Dockerfile"
         candidate="$proof_dir/cloud-redis.Dockerfile"
         test "$(grep -c 'openssl redis session' "$dockerfile")" = 1
-        sed "s;openssl redis session;openssl phpredis/phpredis@$redis_ref session;" "$dockerfile" > "$candidate"
+        sed -e 's;^RUN install-php-extensions gd;RUN --mount=type=bind,from=phpredis-source,target=/tmp/phpredis,rw install-php-extensions gd;' \
+            -e 's;openssl redis session;openssl /tmp/phpredis session;' "$dockerfile" > "$candidate"
         diff -u "$dockerfile" "$candidate" || test "$?" = 1
         original="$proof_dir/cloud/tests/image.sh"
         offline="$proof_dir/cloud-image-offline.sh"
@@ -118,6 +136,7 @@ case "${1:?verification stage}" in
         for engine in sqlite mysql pgsql; do
             image="maho-php86-proof:cloud-$engine"
             docker buildx build --builder default --platform "$platform" --load --progress plain --file "$candidate" \
+                --build-context "phpredis-source=$bundle" \
                 --build-arg PHP_VERSION=8.6 --build-arg "BASE_IMAGE=$base_tag" \
                 --target "$engine" --tag "$image" "$proof_dir/cloud"
             inspect_image "$image"

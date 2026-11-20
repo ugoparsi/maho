@@ -35,6 +35,8 @@ jobs:
 
       - name: Compile the FrankenPHP runner
         id: frankenphp
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: bash .github/scripts/php86-container-proof.sh frankenphp
 
       - name: Build the Cloud engine images with the pinned PhpRedis source
