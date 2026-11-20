@@ -84,8 +84,25 @@ function mahoServerDeltaAfterOpen(PDO $connection): PDO
     return $connection;
 }
 
-mahoServerDeltaRecord('prepend', ['root' => MAHO_DELTA_ROOT]);
-register_shutdown_function(static function (): void {
+function mahoServerDeltaBeforeQuery(
+    Maho\Db\Adapter\AbstractPdoAdapter $adapter,
+    Doctrine\DBAL\Connection $connection,
+): void {
+    static $seen;
+    $seen ??= new WeakMap();
+    if (isset($seen[$connection])) {
+        return;
+    }
+    $pdo = $connection->getNativeConnection();
+    mahoServerDeltaRecord('first_adapter_query', mahoServerDeltaIdentity($pdo) + [
+        'maho' => $adapter->getTransactionLevel(), 'dbal' => $connection->getTransactionNestingLevel(),
+        'pdo' => $pdo->inTransaction(),
+    ]);
+    $seen[$connection] = true;
+}
+
+function mahoServerDeltaObserveIdle(string $phase): void
+{
     if (!class_exists(Mage::class, false) || (new ReflectionProperty(Mage::class, '_app'))->getValue() === null) {
         return;
     }
@@ -108,5 +125,8 @@ register_shutdown_function(static function (): void {
     $callbacks = class_exists(Mage_Core_Model_Resource_Abstract::class, false)
         ? (new ReflectionProperty(Mage_Core_Model_Resource_Abstract::class, '_commitCallbacks'))->getValue() : [];
     mahoServerDeltaRequire(!array_filter($callbacks), 'Queued resource callbacks at shutdown');
-    mahoServerDeltaRecord('shutdown_idle', ['aliases' => $aliases, 'pending_callbacks' => 0]);
-});
+    mahoServerDeltaRecord($phase, ['aliases' => $aliases, 'pending_callbacks' => 0]);
+}
+
+mahoServerDeltaRecord('prepend', ['root' => MAHO_DELTA_ROOT]);
+register_shutdown_function(static fn () => mahoServerDeltaObserveIdle('shutdown_idle'));

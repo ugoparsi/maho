@@ -106,6 +106,8 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 3
 
       - name: Get composer cache directory
         id: composer-cache
@@ -128,7 +130,8 @@ jobs:
           DB_ENGINE: ${{ matrix.db_engine }}
           DB_ID: ${{ job.services.db.id }}
         run: |
-          test "$(git cat-file -p HEAD | sed -n 's/^parent //p')" = a1a13f0c6b069785490b09650957d2936df15a75
+          test "$(git rev-parse HEAD^^)" = a1a13f0c6b069785490b09650957d2936df15a75
+          test -z "$(git diff --name-only HEAD^^ HEAD -- . ':!.github/workflows/pest.yml' ':!.github/scripts/php86-server-delta.php.source')"
           test ! -e app/etc/local.xml
           test "$(realpath vendor)" = "$GITHUB_WORKSPACE/vendor"
           test "$(git hash-object composer.lock)" = f2d30a5764de1c32a2f5d47121d102e29134e9df
@@ -149,9 +152,33 @@ jobs:
               assert source.count(old) == 1, old
               source = source.replace(old, new)
           f.write_text(source)
+          for adapter in ('Mysql', 'Pgsql'):
+              f = Path(f'lib/Maho/Db/Adapter/Pdo/{adapter}.php')
+              source = f.read_text()
+              query = source.index('    public function query(')
+              connect = source.index('            $this->_connect();', query)
+              insert = source.index(chr(10), connect)
+              f.write_text(source[:insert] + chr(10) + r'            \mahoServerDeltaBeforeQuery($this, $this->_connection);' + source[insert:])
+          f = Path('tests/MahoBackendTestCase.php')
+          source = f.read_text()
+          assert source.count('        Mage::app();') == source.count('        Mage::reset();') == 1
+          source = source.replace('        Mage::app();', '        Mage::app();' + chr(10) + r"        \mahoServerDeltaObserveIdle('backend_ready');")
+          source = source.replace('        Mage::reset();', r"        \mahoServerDeltaObserveIdle('backend_before_reset');" + chr(10) + '        Mage::reset();')
+          f.write_text(source)
+          f = Path('tests/Pest.php')
+          source = f.read_text()
+          old = r'        \Mage::app();' + chr(10) + r"        $config = \Mage::getModel('core/config');" + chr(10)*2 + '        $protocols = '
+          assert source.count(old) == 1
+          guard = r"        \mahoServerDeltaObserveIdle('api_before_fixtures');"
+          f.write_text(source.replace(old, old.replace(chr(10), chr(10) + guard + chr(10), 1)))
           PYCODE
           php -l "$pdo_file"
           echo "PDO hook $pdo_before -> $(git hash-object "$pdo_file")"
+          git diff -- lib/Maho/Db/Adapter/Pdo tests/MahoBackendTestCase.php tests/Pest.php
+          guard_path="$GITHUB_WORKSPACE/.github/scripts/php86-server-delta.php.source"
+          ini_dir="$RUNNER_TEMP/maho-php-ini"
+          mkdir "$ini_dir"
+          printf 'auto_prepend_file="%s"\n' "$guard_path" > "$ini_dir/99-maho-server-delta.ini"
           if [ "$DB_ENGINE" = pgsql ]; then
             identity=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$DB_ID")
           else
@@ -159,7 +186,8 @@ jobs:
           fi
           test -n "$identity"
           {
-            echo "MAHO_SERVER_GUARD=$GITHUB_WORKSPACE/.github/scripts/php86-server-delta.php.source"
+            echo "MAHO_SERVER_GUARD=$guard_path"
+            echo "PHP_INI_SCAN_DIR=${PHP_INI_SCAN_DIR:-}:$ini_dir"
             echo "MAHO_SERVER_LOG=$RUNNER_TEMP/maho-server-guard.jsonl"
             echo "MAHO_DB_ENGINE=$DB_ENGINE"
             echo "MAHO_DB_CONTAINER_IDENTITY=$identity"
@@ -168,11 +196,16 @@ jobs:
 
       - name: Install Maho
         run: |
+          cat > "$RUNNER_TEMP/maho-verify-prepend.php" <<'PHP'
+          <?php
+          exit(function_exists('mahoServerDeltaBeforeOpen') ? 0 : 1);
+          PHP
+          php "$RUNNER_TEMP/maho-verify-prepend.php"
           SAMPLE_ARCHIVE="$RUNNER_TEMP/maho-sample-data.tar.gz"
           curl --fail --location --retry 3 --output "$SAMPLE_ARCHIVE" "https://codeload.github.com/MahoCommerce/maho-sample-data/tar.gz/$MAHO_SAMPLE_COMMIT"
           echo "$MAHO_SAMPLE_SHA256  $SAMPLE_ARCHIVE" | sha256sum --check
           tar -xzf "$SAMPLE_ARCHIVE" -C "$RUNNER_TEMP"
-          php -d auto_prepend_file="$MAHO_SERVER_GUARD" maho install \
+          php maho install \
             --license_agreement_accepted yes \
             --locale en_US \
             --timezone Europe/London \
@@ -192,17 +225,17 @@ jobs:
             --admin_username admin \
             --admin_password asdasdasd123123123 \
             --sample_data "$RUNNER_TEMP/maho-sample-data-$MAHO_SAMPLE_COMMIT"
-          php -d auto_prepend_file="$MAHO_SERVER_GUARD" maho index:reindex:all
-          php -d auto_prepend_file="$MAHO_SERVER_GUARD" maho cache:flush
+          php maho index:reindex:all
+          php maho cache:flush
 
       - name: Start loopback server
         run: |
           set -euo pipefail
-          php -d auto_prepend_file="$MAHO_SERVER_GUARD" maho config:set apiplatform/oauth2/secret 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef --encrypt --scope default --scope-id 0 --silent
-          php -d auto_prepend_file="$MAHO_SERVER_GUARD" maho cache:flush
+          php maho config:set apiplatform/oauth2/secret 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef --encrypt --scope default --scope-id 0 --silent
+          php maho cache:flush
           cat > "$RUNNER_TEMP/maho-router.php" <<'PHP'
           <?php
-          require getenv('MAHO_SERVER_GUARD');
+          require_once getenv('MAHO_SERVER_GUARD');
           return require getenv('GITHUB_WORKSPACE') . '/tests/router.php';
           PHP
           php -S 127.0.0.1:8901 -t public "$RUNNER_TEMP/maho-router.php" > "$RUNNER_TEMP/maho-server.log" 2>&1 < /dev/null &
@@ -222,6 +255,7 @@ jobs:
           php --version
           grep -q '"phase":"before_open"' "$MAHO_SERVER_LOG"
           grep -q '"phase":"opened"' "$MAHO_SERVER_LOG"
+          grep -q '"phase":"first_adapter_query"' "$MAHO_SERVER_LOG"
           for test_file in \
             tests/Backend/Unit/FeedManager/Model/GeneratorEfficiencyInteractionTest.php \
             tests/Backend/Unit/FeedManager/Model/GeneratorParentPreloadPageTest.php \
@@ -233,8 +267,11 @@ jobs:
             tests/Backend/Integration/CustomerSegmentation/Model/CustomerAttributesIntegrationTest.php \
             tests/Api/V2/Read/DashboardVisitorsTest.php
           do
-            php -d auto_prepend_file="$MAHO_SERVER_GUARD" vendor/bin/pest \
+            php vendor/bin/pest \
               --display-errors --display-warnings --exclude-group=currency-live --exclude-group=sandbox "$test_file"
+          done
+          for event in backend_ready backend_before_reset api_before_fixtures; do
+            grep -q "\"phase\":\"$event\"" "$MAHO_SERVER_LOG"
           done
 
       - name: Stop loopback server
