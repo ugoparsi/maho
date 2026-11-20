@@ -1,0 +1,70 @@
+<?php
+
+declare(strict_types=1);
+
+use Symfony\Component\Cache\Adapter\RedisAdapter;
+use Symfony\Component\HttpFoundation\Session\Session;
+use Symfony\Component\HttpFoundation\Session\Storage\Handler\NativeFileSessionHandler;
+use Symfony\Component\HttpFoundation\Session\Storage\Handler\RedisSessionHandler;
+use Symfony\Component\HttpFoundation\Session\Storage\NativeSessionStorage;
+use Symfony\Component\HttpFoundation\Session\Storage\Proxy\SessionHandlerProxy;
+
+[$script, $root, $data, $type, $phase] = $argv;
+if (realpath($root) !== $root || realpath($data) !== $data || !in_array($type, ['file','redis'], true)) {
+    throw new LogicException('Unexpected source root or fixture directory.');
+}
+if (is_file($root . '/app/etc/local.xml')) {
+    throw new LogicException('Unexpected Maho configuration.');
+}
+require $root . '/vendor/autoload.php';
+
+function verify(bool $ok, string $message): void
+{
+    if (!$ok) {
+        throw new LogicException($message);
+    }
+}
+
+set_error_handler(static function (int $severity, string $message, string $file, int $line): never {
+    throw new ErrorException($message, 0, $severity, $file, $line);
+});
+$handler = match ($type) {
+    'file' => new NativeFileSessionHandler($data),
+    'redis' => new RedisSessionHandler(RedisAdapter::createConnection('redis://127.0.0.1:56379/13'),
+        ['prefix' => 'maho_php86_fixture:', 'ttl' => 180]),
+};
+$handlerFile = (new ReflectionClass($handler))->getFileName();
+verify(str_starts_with($handlerFile, $root . '/vendor/symfony/http-foundation/'), 'Unexpected handler source.');
+$storage = new NativeSessionStorage([
+    'name' => 'maho_fixture', 'use_cookies' => false, 'gc_probability' => '0', 'use_strict_mode' => '1',
+], $handler);
+$proxy = $storage->getSaveHandler();
+verify($proxy instanceof SessionHandlerProxy && is_callable([$proxy, 'create_sid']) && is_callable([$proxy, 'validateId']), 'Proxy interface missing.');
+$session = new Session($storage);
+$identifier = $data . '/owned-id';
+if ($phase === 'persist') {
+    verify(!is_file($identifier), 'Fixture already exists.');
+    verify($session->start(), 'Session did not start.');
+    $session->set('test', ['marker' => 'synthetic', 'quantity' => 3]);
+    $id = $session->getId();
+    verify($id !== '', 'Session was not assigned an identifier.');
+    $session->save();
+    verify(session_status() === PHP_SESSION_NONE, 'Session remains open after save.');
+    file_put_contents($identifier, $id, LOCK_EX);
+} elseif ($phase === 'resume') {
+    $id = file_get_contents($identifier);
+    $session->setId($id);
+    verify($session->start() && $session->getId() === $id, 'Generated session was not resumed.');
+    verify($session->get('test') === ['marker' => 'synthetic', 'quantity' => 3], 'Stored session value changed.');
+    verify(session_destroy() && session_status() === PHP_SESSION_NONE, 'Session was not destroyed.');
+    unlink($identifier);
+} else {
+    throw new LogicException('Unexpected fixture phase.');
+}
+restore_error_handler();
+verify(ini_get('session.use_strict_mode') === '1', 'Wrong session mode.');
+if (class_exists('Mage', false)) {
+    verify(new ReflectionProperty(Mage::class, '_app')->getValue() === null, 'Maho application started.');
+}
+echo json_encode(['php' => PHP_VERSION, 'handler' => $type, 'phase' => $phase,
+    'handler_source_sha256' => hash_file('sha256', $handlerFile), 'result' => 'pass'], JSON_THROW_ON_ERROR), PHP_EOL;

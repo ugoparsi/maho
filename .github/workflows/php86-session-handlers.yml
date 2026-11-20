@@ -1,0 +1,60 @@
+name: PHP 8.6 session handler verification
+
+on:
+  push:
+    branches: [verify/php86-session-handlers-20261120]
+
+permissions:
+  contents: read
+
+jobs:
+  sessions:
+    if: github.repository == 'ugoparsi/maho'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - '127.0.0.1:56379:6379'
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=2s
+          --health-timeout=3s
+          --health-retries=15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.6'
+          extensions: redis
+          coverage: none
+      - name: Install the locked session packages
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = a1a13f0c6b069785490b09650957d2936df15a75
+          test "$(git rev-parse HEAD:composer.lock)" = "$(git rev-parse HEAD^:composer.lock)"
+          test ! -e app/etc/local.xml
+          test ! -e vendor
+          php -r 'exit(PHP_VERSION === "8.6.0" && extension_loaded("redis") ? 0 : 1);'
+          composer install --no-dev --no-scripts --no-plugins --prefer-dist --no-progress --ignore-platform-req=ext-*
+          test "$(realpath vendor)" = "$(pwd -P)/vendor"
+      - name: Persist, resume and destroy a synthetic session with each handler
+        env:
+          REDIS_CONTAINER: ${{ job.services.redis.id }}
+        run: |
+          set -euo pipefail
+          test "$(docker exec "$REDIS_CONTAINER" redis-cli -n 13 DBSIZE)" = 0
+          root=$(pwd -P)
+          for handler in file redis; do
+            data="$RUNNER_TEMP/session-$handler"
+            mkdir -m 700 "$data"
+            for phase in persist resume; do
+              php -d error_reporting=-1 .github/scripts/php86-session-handler.php.source "$root" "$data" "$handler" "$phase"
+            done
+            test -z "$(ls -A "$data")"
+          done
+          test "$(docker exec "$REDIS_CONTAINER" redis-cli -n 13 DBSIZE)" = 0
+          test ! -e app/etc/local.xml
