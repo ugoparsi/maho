@@ -46,7 +46,8 @@ serve_probe() {
         docker rm -fv "$test_container" >/dev/null 2>&1 || true
     }
     trap cleanup_probe EXIT
-    docker run -d --network none --name "$test_container" --label "$label" +        -e SERVER_NAME=:8080 "$ref"
+    docker run -d --network none --name "$test_container" --label "$label" \
+        -e SERVER_NAME=:8080 "$ref"
     test "$(docker inspect "$test_container" --format '{{.HostConfig.NetworkMode}}')" = none
     docker exec -i "$test_container" sh -c 'cat > /app/public/maho-php86-runtime.php' <<'PHP'
 <?php
@@ -57,7 +58,8 @@ if (file_exists('/app/app/etc/local.xml')) {
 header('Content-Type: application/json');
 echo json_encode(['php' => PHP_VERSION, 'sapi' => PHP_SAPI, 'zts' => (bool) PHP_ZTS], JSON_THROW_ON_ERROR);
 PHP
-    response=$(docker exec "$test_container" curl --fail --silent --show-error --max-time 4 +        --retry 4 --retry-connrefused http://127.0.0.1:8080/maho-php86-runtime.php)
+    response=$(docker exec "$test_container" curl --fail --silent --show-error --max-time 4 \
+        --retry 4 --retry-connrefused http://127.0.0.1:8080/maho-php86-runtime.php)
     jq -e '.php == "8.6.0" and .sapi == "frankenphp" and .zts' <<<"$response"
     printf 'FrankenPHP HTTP runtime %s\n' "$response"
     docker rm -fv "$test_container" >/dev/null
@@ -74,12 +76,19 @@ case "${1:?verification stage}" in
         fetch_source MahoCommerce/mahocloud-docker-images "$cloud_ref" "$proof_dir/cloud"
         ;;
     frankenphp)
-        docker buildx build --builder default --platform "$platform" --load --progress plain +            --build-context "php-base=$php_base" --build-context "golang-base=$go_base" +            --target runner --build-arg "FRANKENPHP_VERSION=proof-$franken_ref" +            --tag "$base_tag" "$proof_dir/frankenphp"
+        docker buildx build --builder default --platform "$platform" --load --progress plain \
+            --build-context "php-base=$php_base" --build-context "golang-base=$go_base" \
+            --target runner --build-arg "FRANKENPHP_VERSION=proof-$franken_ref" \
+            --tag "$base_tag" "$proof_dir/frankenphp"
         inspect_image "$base_tag"
         serve_probe "$base_tag"
         ;;
     maho)
-        docker buildx build --builder default --platform "$platform" --load --progress plain +            --build-arg PHP_VERSION=8.6 --build-arg MAHO_VERSION=26.11.3 +            --build-arg MYSQL=true --build-arg PGSQL=true --build-arg SQLITE=true +            --build-arg NODEJS=true --build-arg NODE_MAJOR=26 +            --tag "$maho_tag" "$proof_dir/maho"
+        docker buildx build --builder default --platform "$platform" --load --progress plain \
+            --build-arg PHP_VERSION=8.6 --build-arg MAHO_VERSION=26.11.3 \
+            --build-arg MYSQL=true --build-arg PGSQL=true --build-arg SQLITE=true \
+            --build-arg NODEJS=true --build-arg NODE_MAJOR=26 \
+            --tag "$maho_tag" "$proof_dir/maho"
         inspect_image "$maho_tag"
         docker run --network none --rm --entrypoint composer "$maho_tag" check-platform-reqs --no-dev
         version=$(docker run --network none --rm --entrypoint php "$maho_tag" /app/maho --version)
@@ -102,7 +111,9 @@ case "${1:?verification stage}" in
         diff -u "$original" "$offline" || test "$?" = 1
         for engine in sqlite mysql pgsql; do
             image="maho-php86-proof:cloud-$engine"
-            docker buildx build --builder default --platform "$platform" --load --progress plain +                --build-arg PHP_VERSION=8.6 --build-arg "BASE_IMAGE=$base_tag" +                --target "$engine" --tag "$image" "$proof_dir/cloud"
+            docker buildx build --builder default --platform "$platform" --load --progress plain \
+                --build-arg PHP_VERSION=8.6 --build-arg "BASE_IMAGE=$base_tag" \
+                --target "$engine" --tag "$image" "$proof_dir/cloud"
             inspect_image "$image"
             bash "$offline" "$image" "$engine"
         done
