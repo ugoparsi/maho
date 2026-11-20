@@ -1,0 +1,132 @@
+<?php
+
+declare(strict_types=1);
+
+$root = getenv('GITHUB_WORKSPACE');
+$log = getenv('MAHO_SERVER_LOG');
+if (getenv('GITHUB_REPOSITORY') !== 'ugoparsi/maho'
+    || !is_string($root) || realpath($root) !== $root || realpath($root . '/vendor') !== $root . '/vendor'
+    || !is_string($log) || dirname($log) !== getenv('RUNNER_TEMP') || is_link($log)
+) {
+    throw new RuntimeException('Missing owned verification runtime');
+}
+define('MAHO_DELTA_ROOT', $root);
+define('MAHO_DELTA_LOG', $log);
+
+function mahoServerDeltaRecord(string $phase, array $fields = []): void
+{
+    file_put_contents(MAHO_DELTA_LOG, json_encode([
+        'phase' => $phase, 'php' => PHP_VERSION, 'pid' => getmypid(),
+    ] + $fields, JSON_THROW_ON_ERROR) . "\n", LOCK_EX | FILE_APPEND);
+}
+
+function mahoServerDeltaRequire(bool $condition, string $reason): void
+{
+    if (!$condition) {
+        mahoServerDeltaRecord('MAHO_DELTA_GUARD_REJECTED', ['reason' => $reason]);
+        throw new RuntimeException($reason);
+    }
+}
+
+function mahoServerDeltaBeforeOpen(string $dsn): void
+{
+    [$engine,$tail] = explode(':', $dsn, 2);
+    $params = [];
+    foreach (explode(';', $tail) as $item) {
+        if ($item !== '') {
+            [$key,$value] = explode('=', $item, 2);
+            mahoServerDeltaRequire(!array_key_exists($key, $params), 'Repeated DSN parameter');
+            $params[$key] = $value;
+        }
+    }
+    $port = $engine === 'pgsql' ? '5432' : '3306';
+    mahoServerDeltaRequire(
+        $engine === getenv('MAHO_DB_ENGINE')
+            && ($params['host'] ?? null) === '127.0.0.1'
+            && ($params['dbname'] ?? null) === 'maho'
+            && ($params['port'] ?? $port) === $port
+            && !isset($params['unix_socket']),
+        'Unexpected connection destination',
+    );
+    mahoServerDeltaRequire(Mage::getBaseDir() === MAHO_DELTA_ROOT, 'Unexpected Mage root');
+    $sources = [];
+    foreach ([
+        Mage::class => '/app/Mage.php',
+        Mage_Core_Model_App::class => '/app/code/core/Mage/Core/Model/App.php',
+        Mage_Core_Model_Resource::class => '/app/code/core/Mage/Core/Model/Resource.php',
+        Doctrine\DBAL\DriverManager::class => '/vendor/doctrine/dbal/src/DriverManager.php',
+    ] as $class => $relative) {
+        $file = (new ReflectionClass($class))->getFileName();
+        mahoServerDeltaRequire($file === MAHO_DELTA_ROOT . $relative && realpath($file) === $file, 'Unexpected class location');
+        $sources[$class] = $file;
+    }
+    mahoServerDeltaRecord('before_open', ['engine' => $engine, 'database' => 'maho', 'sources' => $sources]);
+}
+
+function mahoServerDeltaIdentity(PDO $connection): array
+{
+    $sql = getenv('MAHO_DB_ENGINE') === 'pgsql'
+        ? 'SELECT current_database() AS db, host(inet_server_addr()) AS instance'
+        : 'SELECT DATABASE() AS db, @@hostname AS instance';
+    $row = $connection->query($sql)->fetch(PDO::FETCH_ASSOC);
+    mahoServerDeltaRequire(
+        ($row['db'] ?? null) === 'maho' && ($row['instance'] ?? null) === getenv('MAHO_DB_CONTAINER_IDENTITY'),
+        'Unexpected server instance or selected database',
+    );
+    return $row;
+}
+
+function mahoServerDeltaAfterOpen(PDO $connection): PDO
+{
+    $identity = mahoServerDeltaIdentity($connection);
+    mahoServerDeltaRequire(!$connection->inTransaction(), 'PDO opened with a transaction');
+    mahoServerDeltaRecord('opened', $identity);
+    return $connection;
+}
+
+function mahoServerDeltaBeforeQuery(
+    Maho\Db\Adapter\AbstractPdoAdapter $adapter,
+    Doctrine\DBAL\Connection $connection,
+): void {
+    static $seen;
+    $seen ??= new WeakMap();
+    if (isset($seen[$connection])) {
+        return;
+    }
+    $pdo = $connection->getNativeConnection();
+    mahoServerDeltaRecord('first_adapter_query', mahoServerDeltaIdentity($pdo) + [
+        'maho' => $adapter->getTransactionLevel(), 'dbal' => $connection->getTransactionNestingLevel(),
+        'pdo' => $pdo->inTransaction(),
+    ]);
+    $seen[$connection] = true;
+}
+
+function mahoServerDeltaObserveIdle(string $phase): void
+{
+    if (!class_exists(Mage::class, false) || (new ReflectionProperty(Mage::class, '_app'))->getValue() === null) {
+        return;
+    }
+    $resource = Mage::registry('_singleton/core/resource');
+    $aliases = [];
+    foreach ($resource ? $resource->getConnections() : [] as $name => $adapter) {
+        if (!$adapter) {
+            continue;
+        }
+        mahoServerDeltaRequire($adapter instanceof Maho\Db\Adapter\AbstractPdoAdapter, 'Unexpected resource adapter');
+        $connection = (new ReflectionProperty(Maho\Db\Adapter\AbstractPdoAdapter::class, '_connection'))->getValue($adapter);
+        $dbal = $connection?->getTransactionNestingLevel() ?? 0;
+        $pdo = $connection?->isConnected() ? $connection->getNativeConnection() : null;
+        mahoServerDeltaRequire(
+            $adapter->getTransactionLevel() === 0 && $dbal === 0 && !($pdo?->inTransaction() ?? false),
+            'Active transaction at shutdown',
+        );
+        $aliases[$name] = $pdo ? mahoServerDeltaIdentity($pdo) : null;
+    }
+    $callbacks = class_exists(Mage_Core_Model_Resource_Abstract::class, false)
+        ? (new ReflectionProperty(Mage_Core_Model_Resource_Abstract::class, '_commitCallbacks'))->getValue() : [];
+    mahoServerDeltaRequire(!array_filter($callbacks), 'Queued resource callbacks at shutdown');
+    mahoServerDeltaRecord($phase, ['aliases' => $aliases, 'pending_callbacks' => 0]);
+}
+
+mahoServerDeltaRecord('prepend', ['root' => MAHO_DELTA_ROOT]);
+register_shutdown_function(static fn () => mahoServerDeltaObserveIdle('shutdown_idle'));
