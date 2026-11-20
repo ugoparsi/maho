@@ -168,3 +168,23 @@ function galleryProofSlow(string $phase, int $start): void
         ]);
     }
 }
+
+function galleryProofSlowQuery(string $sql, int $start, ?array $issue): void
+{
+    $elapsed = hrtime(true) - $start;
+    if ($elapsed <= 100_000_000) {
+        return;
+    }
+    preg_match('/^\s*(?:INSERT(?:\s+OR\s+\w+)?\s+INTO|UPDATE|DELETE\s+FROM)\s+["`]?([a-zA-Z_][a-zA-Z0-9_]*)/i', $sql, $match);
+    $frames = [];
+    foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 32) as $frame) {
+        $frames[] = ($frame['class'] ?? '') . ($frame['type'] ?? '') . $frame['function'];
+    }
+    localeProofReceipt('gallery_slow', [
+        'name' => 'query_' . strtolower(strtok(ltrim($sql), " \n\t") ?: 'empty'),
+        'ms' => $elapsed / 1e6,
+        'table' => $match[1] ?? null,
+        'issue' => $issue,
+        'stack' => $frames,
+    ]);
+}

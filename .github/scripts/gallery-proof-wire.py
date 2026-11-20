@@ -25,10 +25,12 @@ def time_adapter(source):
     def insert(text, anchor, update_text):
         assert text.count(anchor) == 1
         return text.replace(anchor, update_text)
-    query = insert(query, '        $this->_debugTimer();', '        $galleryStart = hrtime(true);\n        $this->_debugTimer();')
+    query = insert(query, '        $this->_debugTimer();', '        $galleryStart = hrtime(true);\n        $galleryIssue = null;\n        $this->_debugTimer();')
     query = insert(query, '            $this->_connect();', '            $this->_connect();\n            \\localeProofBeforeQuery($this, $this->_connection);')
+    query = insert(query, '        } catch (\\Exception $e) {', '''        } catch (\\Exception $e) {
+            $galleryIssue = ['class' => $e::class, 'code' => $e->getCode(), 'sqlite_locked' => str_contains($e->getMessage(), 'database is locked')];''')
     query = insert(query, '            $span?->end();', """            $span?->end();
-            \\galleryProofSlow('query_' . strtolower(strtok(ltrim((string) $sql), " \\n\\t") ?: 'empty'), $galleryStart);""")
+            \\galleryProofSlowQuery((string) $sql, $galleryStart, $galleryIssue);""")
     source = source[:begin] + query + source[end:]
     start = source.index('    public function getLock(')
     end = source.index('    public function releaseLock(', start)

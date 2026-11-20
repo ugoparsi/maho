@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
+          fetch-depth: 3
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.6'
@@ -26,8 +26,8 @@ jobs:
       - name: Prepare toolchain and guarded files
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = a1a13f0c6b069785490b09650957d2936df15a75
-          test "$(git rev-parse HEAD:composer.lock)" = "$(git rev-parse HEAD^:composer.lock)"
+          test "$(git rev-parse HEAD~2)" = a1a13f0c6b069785490b09650957d2936df15a75
+          test "$(git rev-parse HEAD:composer.lock)" = "$(git rev-parse HEAD~2:composer.lock)"
           test ! -e app/etc/local.xml
           composer install --prefer-dist --no-progress --ignore-platform-req=ext-*
           export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/gallery-chromium"
