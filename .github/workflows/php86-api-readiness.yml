@@ -1,0 +1,110 @@
+name: PHP 8.6 API readiness verification
+
+on:
+  push:
+    branches: [verify/php86-api-readiness-20261120]
+
+permissions:
+  contents: read
+
+jobs:
+  sqlite-api:
+    if: github.repository == 'ugoparsi/maho'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MAGE_IS_DEVELOPER_MODE: 1
+      API_BASE_URL: http://127.0.0.1:18986
+      SAMPLE_COMMIT: e796677c36ae694cadf156b763b096fd2abb619e
+      SAMPLE_SHA256: a4f54cd18709a72eefe8221f5ca0327afddf269eae628eb5c970dc9e82071191
+
+    steps:
+      - name: Setup PHP
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.6'
+          extensions: opcache, pdo_sqlite, soap
+          coverage: none
+          ini-values: opcache.jit=disable, opcache.jit_buffer_size=0
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+
+      - name: Install locked dependencies
+        run: |
+          test "$(git rev-parse HEAD^)" = 231a2fa8d699a8dd93438cc8087db1b2275d279b
+          test -z "$(git diff --name-only HEAD^ HEAD -- . ':(exclude).github/workflows/php86-api-readiness.yml' ':(exclude).github/scripts/php86-api-readiness-*')"
+          test ! -e app/etc/local.xml
+          test "$(git hash-object composer.lock)" = dd48e3d83fc35b4f8e11be89f7a4b8e3bbc3bdc8
+          composer install --prefer-dist --no-interaction --no-progress
+          composer check-platform-reqs --no-dev
+
+      - name: Wire owned SQLite guards
+        run: |
+          test "$(realpath vendor)" = "$GITHUB_WORKSPACE/vendor"
+          test ! -e app/etc/local.xml
+          mkdir -p var/db
+          python3 - <<'PY'
+          from pathlib import Path
+          def change(file, before, after):
+              path=Path(file)
+              code=path.read_text()
+              assert code.count(before)==1,file
+              path.write_text(code.replace(before,after))
+          manager='vendor/doctrine/dbal/src/DriverManager.php'
+          marker="        $config ??= new Configuration();"
+          change(manager,marker,'''        if (($params['driver'] ?? null) !== 'pdo_sqlite') {
+                      throw new \\RuntimeException('Unexpected fixture database driver');
+                  }
+                  \\localeProofRequirePath($params['path'] ?? '');
+          '''+marker)
+          pdo='vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php'
+          change(pdo,'        if (PHP_VERSION_ID < 80400) {',
+                 r'        \localeProofBeforeOpen($dsn);'+'\n        if (PHP_VERSION_ID < 80400) {')
+          change(pdo,'return new PDO($dsn, $username, $password, $options);',
+                 r'return \localeProofAfterOpen(new PDO($dsn, $username, $password, $options));')
+          change(pdo,'return PDO::connect($dsn, $username, $password, $options);',
+                 r'return \localeProofAfterOpen(PDO::connect($dsn, $username, $password, $options));')
+          change('lib/Maho/Db/Adapter/Pdo/Sqlite.php','            // Execute query using Doctrine DBAL',
+                 r'            \localeProofBeforeQuery($this, $this->_connection);'+'\n            // Execute query using Doctrine DBAL')
+          api='tests/Pest.php'
+          setup=r"        \Mage::app();" + chr(10) + "        $config = " + r"\Mage::getModel('core/config');"
+          change(api, setup, setup.replace(chr(10), chr(10) + "        " + r"\localeProofIdle('api_before_fixtures');" + chr(10), 1))
+          PY
+          guard="$GITHUB_WORKSPACE/.github/scripts/php86-api-readiness-guard.php.source"
+          ini_dir="$RUNNER_TEMP/maho-api-ini"
+          mkdir "$ini_dir"
+          printf 'auto_prepend_file="%s"\n' "$guard" > "$ini_dir/99-fixture.ini"
+          {
+            echo "PHP_INI_SCAN_DIR=${PHP_INI_SCAN_DIR:-}:$ini_dir"
+            echo "MAHO_LOCALE_PROOF_ROOT=$GITHUB_WORKSPACE"
+            echo "MAHO_LOCALE_PROOF_RECEIPT=$RUNNER_TEMP/api-proof-guard.jsonl"
+          } >> "$GITHUB_ENV"
+
+      - name: Install the owned SQLite store
+        run: |
+          test ! -e var/db/api-proof.sqlite
+          cat > "$RUNNER_TEMP/check-prepend.php" <<'PHP'
+          <?php exit(function_exists('localeProofBeforeOpen') ? 0 : 1);
+          PHP
+          php "$RUNNER_TEMP/check-prepend.php"
+          archive="$RUNNER_TEMP/sample-data.tar.gz"
+          curl --fail --location --retry 3 --output "$archive" "https://codeload.github.com/MahoCommerce/maho-sample-data/tar.gz/$SAMPLE_COMMIT"
+          echo "$SAMPLE_SHA256  $archive" | sha256sum --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          php maho install \
+            --license_agreement_accepted yes --locale en_US --timezone Europe/London \
+            --default_currency USD --db_name api-proof.sqlite --db_engine sqlite \
+            --url http://127.0.0.1:18986/ --secure_base_url http://127.0.0.1:18986/ \
+            --use_secure 0 --use_secure_admin 0 --admin_lastname Fixture --admin_firstname Test \
+            --admin_email fixture@example.test --admin_username fixture --admin_password test-password-860 \
+            --sample_data "$RUNNER_TEMP/maho-sample-data-$SAMPLE_COMMIT"
+          php maho index:reindex:all
+          php maho config:set apiplatform/oauth2/secret 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef --encrypt --scope default --scope-id 0 --silent
+          php maho cache:flush
+
+
+      - name: Compare the cold start with both cURL deadlines
+        run: python3 .github/scripts/php86-api-readiness-proof.py
