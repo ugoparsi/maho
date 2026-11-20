@@ -1,0 +1,64 @@
+<?php
+
+declare(strict_types=1);
+
+try {
+    $path = $_SERVER['REQUEST_URI'] ?? '';
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET' || !in_array($path, ['/start', '/save', '/read', '/clear'], true)) {
+        http_response_code(404);
+        return;
+    }
+
+    require LOCALE_PROOF_ROOT . '/vendor/autoload.php';
+    Mage::setRoot(LOCALE_PROOF_ROOT);
+    Mage::app();
+    localeProofRequireMageRoot();
+    Mage::app()->setCurrentStore(1);
+    localeProofIdle('redis_fixture_ready');
+
+    $sessionName = Mage_Core_Controller_Front_Action::SESSION_NAMESPACE;
+    $incomingCookie = $_COOKIE[$sessionName] ?? null;
+    $session = Mage::getSingleton('core/session', ['name' => $sessionName]);
+    if ($session->getSessionSaveMethod() !== 'redis') {
+        throw new RuntimeException('Expected the configured Redis session handler');
+    }
+
+    $cacheId = 'LOCAL_REDIS_FIXTURE_860';
+    $cacheTag = 'LOCAL_REDIS_FIXTURE_TAG';
+    $otherCacheId = 'LOCAL_REDIS_CONTROL_860';
+    if ($path === '/save') {
+        $session->setData('local_fixture', 'persisted-session');
+        Mage::app()->saveCache('persisted-cache', $cacheId, [$cacheTag], 180);
+        Mage::app()->saveCache('untagged-control', $otherCacheId, [], 180);
+    }
+    $response = [
+        'php' => PHP_VERSION,
+        'redis_extension' => phpversion('redis'),
+        'jit_active' => (bool) (opcache_get_status(false)['jit']['on'] ?? false),
+        'xdebug' => extension_loaded('xdebug'),
+        'cookie_accepted' => is_string($incomingCookie) && $session->getSessionId() === $incomingCookie,
+        'session' => $session->getData('local_fixture'),
+        'cache' => Mage::app()->loadCache($cacheId),
+        'session_ttl' => (new ReflectionMethod(Mage_Core_Model_Session_Abstract::class, 'getSessionLifetime'))->invoke($session),
+    ];
+    if ($path === '/clear') {
+        Mage::app()->cleanCache([$cacheTag]);
+        if (!session_destroy()) {
+            throw new RuntimeException('Could not remove the synthetic session');
+        }
+        $response['tag_invalidated'] = !Mage::app()->testCache($cacheId);
+        $response['untagged_cache_preserved'] = Mage::app()->loadCache($otherCacheId) === 'untagged-control';
+        Mage::app()->removeCache($otherCacheId);
+    }
+
+    Mage_Core_Model_Session_Abstract::closeSession();
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        throw new RuntimeException('Session remained open');
+    }
+    localeProofIdle('redis_fixture_closed');
+    header('Content-Type: application/json');
+    echo json_encode($response, JSON_THROW_ON_ERROR);
+} catch (Throwable $failure) {
+    error_log($failure::class . ': ' . $failure->getMessage());
+    http_response_code(500);
+}
