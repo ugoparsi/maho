@@ -1,0 +1,50 @@
+name: PHP 8.6 container proof
+
+on:
+  push:
+    branches:
+      - verify/php86-container-build-20261120
+
+permissions:
+  contents: read
+
+jobs:
+  containers:
+    if: github.repository == 'ugoparsi/maho'
+    name: Containers (${{ matrix.architecture }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            architecture: amd64
+          - runner: ubuntu-24.04-arm
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      PROOF_ARCH: ${{ matrix.architecture }}
+    steps:
+      - name: Checkout verification branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch pinned build sources
+        run: bash .github/scripts/php86-container-proof.sh fetch
+
+      - name: Compile the FrankenPHP runner
+        id: frankenphp
+        run: bash .github/scripts/php86-container-proof.sh frankenphp
+
+      - name: Build and check the Maho image
+        if: steps.frankenphp.outcome == 'success'
+        run: bash .github/scripts/php86-container-proof.sh maho
+
+      - name: Build and check the Cloud engine images
+        if: ${{ !cancelled() && steps.frankenphp.outcome == 'success' }}
+        run: bash .github/scripts/php86-container-proof.sh cloud
+
+      - name: Check cleanup
+        if: ${{ always() }}
+        run: bash .github/scripts/php86-container-proof.sh cleanup
