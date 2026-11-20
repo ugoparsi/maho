@@ -1,24 +1,14 @@
-name: Storage buckets
+name: Storage buckets PHP 8.6 verification
 
 # Runs the storage mount tests against bucket emulators: S3Mock for S3 and Azurite for Azure
 # Blob Storage. The MinIO images are no longer public. The GCS test builds the adapter and
 # its public URL, because no emulator works with the Google client without extra options. The suite needs no database: the tests
 # build their mounts directly, so no ./maho install runs here.
 
-# Only the storage code can break these tests, so the job stays off every other pull request.
 on:
   push:
     branches:
-      - main
-    paths: &storage_paths
-      - 'lib/Maho/Storage/**'
-      - 'tests/Backend/Unit/Maho/Storage/**'
-      - '.github/workflows/storage-remote.yml'
-      - 'composer.json'
-      - 'composer.lock'
-  pull_request:
-    paths: *storage_paths
-  workflow_dispatch:
+      - verify/php86-storage-buckets-20261120
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -29,6 +19,7 @@ permissions:
 
 jobs:
   storage-remote:
+    if: github.repository == 'ugoparsi/maho'
     name: Storage mounts on S3Mock, Azurite and GCS
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -37,12 +28,12 @@ jobs:
       s3mock:
         image: adobe/s3mock:5.2.3
         ports:
-          - 9000:9090
+          - 127.0.0.1:9000:9090
       azurite:
         image: mcr.microsoft.com/azure-storage/azurite:3.37.0
         command: azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck --loose
         ports:
-          - 10000:10000
+          - 127.0.0.1:10000:10000
 
     env:
       MAHO_TEST_S3_ENDPOINT: http://127.0.0.1:9000
@@ -56,15 +47,17 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
-          php-version: 8.5
+          php-version: 8.6
           extensions: opcache
 
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
 
       - name: Get composer cache directory
         id: composer-cache
-        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
 
       - name: Cache dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -90,6 +83,19 @@ jobs:
             done
           done
 
-      # --testsuite keeps the Browser suite out: its files need Playwright at load time.
+      # These cases use the owned emulators and a GCS URL construction control.
       - name: Run the bucket storage tests
-        run: ./vendor/bin/pest --display-errors --display-warnings --testsuite=Backend --group=storage-s3 --group=storage-azure --group=storage-gcs
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = a1a13f0c6b069785490b09650957d2936df15a75
+          test ! -e app/etc/local.xml
+          test ! -e var/db
+          php -v
+          php -r 'exit(PHP_MAJOR_VERSION === 8 && PHP_MINOR_VERSION === 6 ? 0 : 1);'
+          ./vendor/bin/pest --display-errors --display-warnings --fail-on-empty-test-suite --fail-on-skipped \
+            tests/Backend/Unit/Maho/Storage/S3MountTest.php \
+            tests/Backend/Unit/Maho/Storage/S3MoveCopyTest.php \
+            tests/Backend/Unit/Maho/Storage/AzureMountTest.php \
+            tests/Backend/Unit/Maho/Storage/GcsMountTest.php
+          test ! -e app/etc/local.xml
+          test ! -e var/db
