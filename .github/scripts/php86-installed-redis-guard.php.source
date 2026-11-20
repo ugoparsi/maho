@@ -1,0 +1,162 @@
+<?php
+
+declare(strict_types=1);
+
+$runtime = getenv('MAHO_LOCALE_PROOF_ROOT');
+$receipt = getenv('MAHO_LOCALE_PROOF_RECEIPT');
+if (getenv('GITHUB_REPOSITORY') !== 'ugoparsi/maho' || $runtime !== getenv('GITHUB_WORKSPACE')
+    || !is_string($runtime) || realpath($runtime) !== $runtime || !is_string($receipt)
+    || dirname($receipt) !== getenv('RUNNER_TEMP')
+    || realpath(dirname($receipt)) !== dirname($receipt)
+    || is_link($receipt) || is_link($runtime . '/vendor') || is_link($runtime . '/app/etc/local.xml')
+    || realpath($runtime . '/var/db') !== $runtime . '/var/db'
+) {
+    throw new RuntimeException('Invalid owned SQLite proof paths');
+}
+define('LOCALE_PROOF_ROOT', $runtime);
+define('LOCALE_PROOF_DB', $runtime . '/var/db/redis-proof.sqlite');
+define('LOCALE_PROOF_RECEIPT', $receipt);
+
+function localeProofReceipt(string $phase, array $detail = []): void
+{
+    file_put_contents(LOCALE_PROOF_RECEIPT, json_encode([
+        'phase' => $phase, 'pid' => getmypid(), 'php' => PHP_VERSION,
+    ] + $detail, JSON_THROW_ON_ERROR) . "\n", FILE_APPEND | LOCK_EX);
+}
+
+function localeProofRequirePath(string $path): void
+{
+    if ($path !== LOCALE_PROOF_DB || is_link($path)
+        || (file_exists($path) && realpath($path) !== LOCALE_PROOF_DB)
+        || realpath(dirname($path)) !== dirname(LOCALE_PROOF_DB)
+    ) {
+        throw new RuntimeException('Unexpected SQLite database path');
+    }
+}
+
+function localeProofRequireMageRoot(): array
+{
+    if (Mage::getBaseDir() !== LOCALE_PROOF_ROOT) {
+        throw new RuntimeException('Unexpected Mage root');
+    }
+    $files = [];
+    foreach ([
+        Mage::class => '/app/Mage.php',
+        Mage_Core_Model_App::class => '/app/code/core/Mage/Core/Model/App.php',
+        Mage_Core_Model_Resource::class => '/app/code/core/Mage/Core/Model/Resource.php',
+        Mage_Core_Helper_String::class => '/app/code/core/Mage/Core/Helper/String.php',
+        Maho\Db\Adapter\Pdo\Sqlite::class => '/lib/Maho/Db/Adapter/Pdo/Sqlite.php',
+        Doctrine\DBAL\DriverManager::class => '/vendor/doctrine/dbal/src/DriverManager.php',
+    ] as $class => $relative) {
+        $path = (new ReflectionClass($class))->getFileName();
+        if ($path !== LOCALE_PROOF_ROOT . $relative || realpath($path) !== $path) {
+            throw new RuntimeException('Unexpected loaded class: ' . $class);
+        }
+        $files[$class] = ['path' => $path, 'sha256' => hash_file('sha256', $path)];
+    }
+    return $files;
+}
+
+function redisProofBeforeConnection(string $dsn): void
+{
+    $targets = ['redis://127.0.0.1:56379/0' => 'cache', 'redis://127.0.0.1:56379/1' => 'session'];
+    if (!isset($targets[$dsn]) || !extension_loaded('redis') || !(new ReflectionClass(Redis::class))->isInternal()) {
+        throw new RuntimeException('Unexpected Redis endpoint or client');
+    }
+    localeProofReceipt('redis_before_connect', ['target' => $targets[$dsn]]);
+}
+
+function localeProofBeforeOpen(string $dsn): void
+{
+    if ($dsn !== 'sqlite:' . LOCALE_PROOF_DB) {
+        throw new RuntimeException('Unexpected PDO driver or DSN');
+    }
+    localeProofRequirePath(substr($dsn, 7));
+    localeProofReceipt('before_pdo_open', ['database' => LOCALE_PROOF_DB, 'classes' => localeProofRequireMageRoot()]);
+}
+
+function localeProofActualDatabase(PDO $pdo): array
+{
+    $databases = $pdo->query('PRAGMA database_list')->fetchAll(PDO::FETCH_ASSOC);
+    $main = array_column($databases, 'file', 'name');
+    unset($main['temp']);
+    if ($main !== ['main' => LOCALE_PROOF_DB]) {
+        throw new RuntimeException('Unexpected database after PDO open');
+    }
+    return $main;
+}
+
+function localeProofAfterOpen(PDO $pdo): PDO
+{
+    localeProofReceipt('pdo_opened', [
+        'databases' => localeProofActualDatabase($pdo), 'in_transaction' => $pdo->inTransaction(),
+    ]);
+    return $pdo;
+}
+
+function localeProofBeforeQuery(Maho\Db\Adapter\Pdo\Sqlite $adapter, Doctrine\DBAL\Connection $connection): void
+{
+    static $seen;
+    $seen ??= new WeakMap();
+    if (isset($seen[$connection])) {
+        return;
+    }
+    $pdo = $connection->getNativeConnection();
+    localeProofReceipt('before_first_adapter_query', [
+        'databases' => localeProofActualDatabase($pdo),
+        'maho_level' => $adapter->getTransactionLevel(),
+        'dbal_level' => $connection->getTransactionNestingLevel(),
+        'pdo_in_transaction' => $pdo->inTransaction(),
+    ]);
+    $seen[$connection] = true;
+}
+
+function localeProofIdle(string $phase): void
+{
+    $resource = Mage::registry('_singleton/core/resource');
+    $connections = [];
+    foreach ($resource ? $resource->getConnections() : [] as $name => $adapter) {
+        if (!$adapter) {
+            continue;
+        }
+        if (!$adapter instanceof Maho\Db\Adapter\Pdo\Sqlite) {
+            throw new RuntimeException('Unexpected resource adapter');
+        }
+        $connection = (new ReflectionProperty(Maho\Db\Adapter\AbstractPdoAdapter::class, '_connection'))->getValue($adapter);
+        $entry = ['adapter' => spl_object_id($adapter), 'connected' => $connection?->isConnected() ?? false,
+            'maho_level' => $adapter->getTransactionLevel(), 'dbal_level' => $connection?->getTransactionNestingLevel() ?? 0];
+        if ($entry['connected']) {
+            $pdo = $connection->getNativeConnection();
+            $entry += ['databases' => localeProofActualDatabase($pdo), 'pdo_in_transaction' => $pdo->inTransaction()];
+        }
+        if ($entry['maho_level'] !== 0 || $entry['dbal_level'] !== 0 || ($entry['pdo_in_transaction'] ?? false)) {
+            throw new RuntimeException('Adapter still has a transaction');
+        }
+        $connections[$name] = $entry;
+    }
+    $callbacks = class_exists(Mage_Core_Model_Resource_Abstract::class, false)
+        ? (new ReflectionProperty(Mage_Core_Model_Resource_Abstract::class, '_commitCallbacks'))->getValue() : [];
+    if (array_filter($callbacks)) {
+        throw new RuntimeException('Resource callbacks are queued at an idle boundary');
+    }
+    $aliases = [];
+    $resources = Mage::getConfig()->getNode('global/resources');
+    foreach ($resources ? $resources->children() : [] as $name => $resourceConfig) {
+        if (isset($resourceConfig->connection)) {
+            $aliases[$name] = (string) ($resourceConfig->connection->use ?: $resourceConfig->connection->type);
+        }
+    }
+    localeProofReceipt($phase, [
+        'configured_aliases' => $aliases, 'connections' => $connections, 'pending_callbacks' => 0,
+    ]);
+}
+
+localeProofReceipt('prepend', ['root' => LOCALE_PROOF_ROOT, 'database' => LOCALE_PROOF_DB,
+    'request_method' => $_SERVER['REQUEST_METHOD'] ?? null,
+    'request_path' => isset($_SERVER['REQUEST_URI']) ? parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) : null,
+]);
+register_shutdown_function(static function (): void {
+    if (class_exists(Mage::class, false) && (new ReflectionProperty(Mage::class, '_app'))->getValue() !== null) {
+        localeProofIdle('shutdown_idle');
+    }
+});

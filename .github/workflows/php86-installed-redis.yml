@@ -1,0 +1,130 @@
+name: PHP 8.6 installed Redis verification
+
+on:
+  push:
+    branches: [verify/php86-installed-redis-20261120]
+
+permissions:
+  contents: read
+
+jobs:
+  redis-integration:
+    if: github.repository == 'ugoparsi/maho'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      MAGE_IS_DEVELOPER_MODE: 1
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - '127.0.0.1:56379:6379'
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=2s
+          --health-timeout=3s
+          --health-retries=5
+
+    steps:
+      - name: Setup PHP
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.6'
+          extensions: pdo_sqlite, redis
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+
+      - name: Install locked dependencies
+        run: |
+          test "$(git rev-parse HEAD^)" = cd64618dbfd61eed32c527a43635bba5c5befee4
+          test -z "$(git diff --name-only HEAD^ HEAD -- . ':(exclude).github/workflows/php86-installed-redis.yml' ':(exclude).github/scripts/php86-installed-redis-*')"
+          test ! -e app/etc/local.xml
+          test "$(git hash-object composer.lock)" = dd48e3d83fc35b4f8e11be89f7a4b8e3bbc3bdc8
+          composer install --no-dev --prefer-dist --no-interaction --no-progress
+          composer check-platform-reqs --no-dev
+
+      - name: Wire owned database and Redis guards
+        run: |
+          test "$(realpath vendor)" = "$GITHUB_WORKSPACE/vendor"
+          test ! -e app/etc/local.xml
+          mkdir -p var/db
+          python3 - <<'PY'
+          from pathlib import Path
+          def change(file, before, after):
+              path=Path(file)
+              code=path.read_text()
+              assert code.count(before)==1,file
+              path.write_text(code.replace(before,after))
+          manager='vendor/doctrine/dbal/src/DriverManager.php'
+          marker="        $config ??= new Configuration();"
+          change(manager,marker,'''        if (($params['driver'] ?? null) !== 'pdo_sqlite') {
+                      throw new \\RuntimeException('Unexpected fixture database driver');
+                  }
+                  \\localeProofRequirePath($params['path'] ?? '');
+          '''+marker)
+          pdo='vendor/doctrine/dbal/src/Driver/PDO/PDOConnect.php'
+          change(pdo,'        if (PHP_VERSION_ID < 80400) {',
+                 r'        \localeProofBeforeOpen($dsn);'+'\n        if (PHP_VERSION_ID < 80400) {')
+          change(pdo,'return new PDO($dsn, $username, $password, $options);',
+                 r'return \localeProofAfterOpen(new PDO($dsn, $username, $password, $options));')
+          change(pdo,'return PDO::connect($dsn, $username, $password, $options);',
+                 r'return \localeProofAfterOpen(PDO::connect($dsn, $username, $password, $options));')
+          change('lib/Maho/Db/Adapter/Pdo/Sqlite.php','            // Execute query using Doctrine DBAL',
+                 r'            \localeProofBeforeQuery($this, $this->_connection);'+'\n            // Execute query using Doctrine DBAL')
+          redis='vendor/symfony/cache/Traits/RedisTrait.php'
+          change(redis,'        $scheme = match (true) {',r'        \redisProofBeforeConnection($dsn);'+'\n        $scheme = match (true) {')
+          PY
+          guard="$GITHUB_WORKSPACE/.github/scripts/php86-installed-redis-guard.php.source"
+          ini_dir="$RUNNER_TEMP/maho-redis-ini"
+          mkdir "$ini_dir"
+          printf 'auto_prepend_file="%s"\n' "$guard" > "$ini_dir/99-fixture.ini"
+          {
+            echo "PHP_INI_SCAN_DIR=${PHP_INI_SCAN_DIR:-}:$ini_dir"
+            echo "MAHO_LOCALE_PROOF_ROOT=$GITHUB_WORKSPACE"
+            echo "MAHO_LOCALE_PROOF_RECEIPT=$RUNNER_TEMP/redis-proof-guard.jsonl"
+          } >> "$GITHUB_ENV"
+
+      - name: Install the owned SQLite store
+        run: |
+          test ! -e var/db/redis-proof.sqlite
+          cat > "$RUNNER_TEMP/check-prepend.php" <<'PHP'
+          <?php exit(function_exists('redisProofBeforeConnection') ? 0 : 1);
+          PHP
+          php "$RUNNER_TEMP/check-prepend.php"
+          php maho install \
+            --license_agreement_accepted yes --locale en_US --timezone Europe/London \
+            --default_currency USD --db_name redis-proof.sqlite --db_engine sqlite \
+            --url http://127.0.0.1:18986/ --secure_base_url http://127.0.0.1:18986/ \
+            --use_secure 0 --use_secure_admin 0 --admin_lastname Fixture --admin_firstname Test \
+            --admin_email fixture@example.test --admin_username fixture --admin_password test-password-860
+
+      - name: Verify configured Redis behavior
+        env:
+          MAHO_REDIS_SERVICE_ID: ${{ job.services.redis.id }}
+        run: python3 .github/scripts/php86-installed-redis-proof.py
+
+      - name: Close fixture
+        if: always()
+        env:
+          MAHO_REDIS_SERVICE_ID: ${{ job.services.redis.id }}
+        run: |
+          if test -f "$RUNNER_TEMP/redis-app-server.log"; then
+            cat "$RUNNER_TEMP/redis-app-server.log"
+          fi
+          if test -f app/etc/local.xml; then
+            rm app/etc/local.xml
+          fi
+          if test -n "$MAHO_REDIS_SERVICE_ID"; then
+            docker exec "$MAHO_REDIS_SERVICE_ID" redis-cli -n 0 FLUSHDB
+            docker exec "$MAHO_REDIS_SERVICE_ID" redis-cli -n 1 FLUSHDB
+            test "$(docker exec "$MAHO_REDIS_SERVICE_ID" redis-cli -n 0 DBSIZE)" = 0
+            test "$(docker exec "$MAHO_REDIS_SERVICE_ID" redis-cli -n 1 DBSIZE)" = 0
+          fi
+          if test -d var/session; then
+            test -z "$(find var/session -type f -name 'sess_*' -print -quit)"
+          fi
+          echo 'REDIS_FIXTURE_CLOSED=1'
