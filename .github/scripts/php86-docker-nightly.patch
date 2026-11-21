@@ -1,0 +1,21 @@
+diff --git a/Dockerfile b/Dockerfile
+index 83dd125..5d40aee 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -1 +1 @@
+-ARG PHP_VERSION=8.5
++ARG PHP_VERSION=8.6
+diff --git a/README.md b/README.md
+index 10fb577..f647b3a 100644
+--- a/README.md
++++ b/README.md
+@@ -7 +7 @@ This image is based on FrankenPHP and is specifically designed for deployment in
+-- `nightly`: `dev-main` version of Maho, running on latest `FrankenPHP` + `PHP 8.5` (Trixie)
++- `nightly`: `dev-main` version of Maho, running on latest `FrankenPHP` + `PHP 8.6` (Trixie)
+diff --git a/versions.json b/versions.json
+index 3d332c2..4c00ec5 100644
+--- a/versions.json
++++ b/versions.json
+@@ -53 +53 @@
+-  { "tag": "nightly",        "php": "8.5", "debian": "trixie",   "maho": "dev-main", "composer_json": "26.11", "mysql": true, "pgsql": true,  "sqlite": true, "caddyfile": "26.11", "nodejs": "26" }
++  { "tag": "nightly",        "php": "8.6", "debian": "trixie",   "maho": "dev-main", "composer_json": "26.11", "mysql": true, "pgsql": true,  "sqlite": true, "caddyfile": "26.11", "nodejs": "26" }
