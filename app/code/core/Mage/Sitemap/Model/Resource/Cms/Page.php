@@ -25,15 +25,18 @@ class Mage_Sitemap_Model_Resource_Cms_Page extends Mage_Core_Model_Resource_Db_A
     public function getCollection($storeId)
     {
         $pages = [];
-        $noRoute = Mage::helper('cms/page')->getConfigPageIdentifier(Mage_Cms_Helper_Page::XML_PATH_NO_ROUTE_PAGE, (int) $storeId);
+        $excludedUrls = [];
+        $storeId = (int) $storeId;
+        $noRoute = Mage::helper('cms/page')->getConfigPageIdentifier(Mage_Cms_Helper_Page::XML_PATH_NO_ROUTE_PAGE, $storeId);
 
         $select = $this->_getWriteAdapter()->select()
             ->from(['main_table' => $this->getMainTable()], [$this->getIdFieldName(), 'identifier AS url'])
             ->join(
                 ['store_table' => $this->getTable('cms/page_store')],
                 'main_table.page_id=store_table.page_id',
-                [],
+                ['store_id'],
             )
+            ->columns('main_table.meta_robots')
             ->where('main_table.is_active=1')
             ->where('store_table.store_id IN(?)', [0, $storeId]);
         $query = $this->_getWriteAdapter()->query($select);
@@ -41,10 +44,19 @@ class Mage_Sitemap_Model_Resource_Cms_Page extends Mage_Core_Model_Resource_Db_A
             if ($row['url'] == Mage_Cms_Model_Page::NOROUTE_PAGE_ID || $row['url'] === $noRoute) {
                 continue;
             }
+            if (preg_match('/(?:^|[,\s])noindex(?:$|[,\s])/i', (string) $row['meta_robots'])) {
+                if ((int) $row['store_id'] === $storeId) {
+                    $excludedUrls[$row['url']] = true;
+                }
+                continue;
+            }
             $page = $this->_prepareObject($row);
             $pages[$page->getId()] = $page;
         }
 
+        if ($excludedUrls !== []) {
+            $pages = array_filter($pages, static fn(\Maho\DataObject $page): bool => !isset($excludedUrls[$page->getUrl()]));
+        }
         return $pages;
     }
 

@@ -220,6 +220,10 @@ sitemaps covering your **categories**, **products**, and **CMS pages**. Key capa
 - **Scheduled generation**: a cron job regenerates the sitemap on a configurable frequency and can
   email a recipient if generation fails.
 
+The XML sitemap omits a CMS page whose own **Meta Robots** field includes `noindex`. When a URL key
+is shared with an all-views page, the active store-view page's directive determines whether that
+URL is listed.
+
 Once generated, reference the sitemap file from your [robots.txt](../hosting/robotstxt.md) so crawlers can
 find it.
 
