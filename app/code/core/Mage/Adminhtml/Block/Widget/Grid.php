@@ -1323,31 +1323,42 @@ class Mage_Adminhtml_Block_Widget_Grid extends Mage_Adminhtml_Block_Widget
             $data = [];
             foreach ($this->_columns as $column) {
                 if (!$column->getIsSystem()) {
-                    $data[] = '"' . str_replace(
-                        ['"', '\\'],
-                        ['""', '\\\\'],
-                        $column->getRowFieldExport($item),
-                    ) . '"';
+                    $data[] = $column->getRowFieldExport($item);
                 }
             }
-            $csv .= implode(',', $data) . "\n";
+            $csv .= $this->_formatCsvRow($data);
         }
 
         if ($this->getCountTotals()) {
             $data = [];
             foreach ($this->_columns as $column) {
                 if (!$column->getIsSystem()) {
-                    $data[] = '"' . str_replace(
-                        ['"', '\\'],
-                        ['""', '\\\\'],
-                        $column->getRowFieldExport($this->getTotals()),
-                    ) . '"';
+                    $data[] = $column->getRowFieldExport($this->getTotals());
                 }
             }
-            $csv .= implode(',', $data) . "\n";
+            $csv .= $this->_formatCsvRow($data);
         }
 
         return $csv;
+    }
+
+    /**
+     * Escape spreadsheet formulas before quoting a row for the string CSV export.
+     *
+     * @param array<int, mixed> $data
+     */
+    protected function _formatCsvRow(array $data): string
+    {
+        $quoted = [];
+        foreach (Mage::helper('core')->getEscapedCSVData($data) as $value) {
+            $quoted[] = '"' . str_replace(
+                ['"', '\\'],
+                ['""', '\\\\'],
+                (string) $value,
+            ) . '"';
+        }
+
+        return implode(',', $quoted) . "\n";
     }
 
     /**
