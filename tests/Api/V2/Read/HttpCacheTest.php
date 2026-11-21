@@ -37,13 +37,17 @@ describe('HTTP cache headers', function (): void {
         $first = apiGet('/api/rest/v2/store-config');
         $etag = apiHeader($first, 'ETag');
         expect($etag)->not->toBeNull();
+        $cacheControl = apiHeader($first, 'Cache-Control');
+        $vary = apiHeader($first, 'Vary');
 
         $second = apiGet('/api/rest/v2/store-config', null, ['If-None-Match' => $etag]);
 
         expect($second['status'])->toBe(304);
         expect($second['raw'])->toBe('');
         // ETag must be echoed on 304 so caches can re-validate.
-        expect(apiHeader($second, 'ETag'))->toBe($etag);
+        expect(apiHeader($second, 'ETag'))->toBe($etag)
+            ->and(apiHeader($second, 'Cache-Control'))->toBe($cacheControl)
+            ->and(apiHeader($second, 'Vary'))->toBe($vary);
     });
 
     it('serves a fresh 200 when If-None-Match does not match', function (): void {

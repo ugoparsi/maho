@@ -28,7 +28,7 @@ use Symfony\Component\HttpKernel\KernelEvents;
 class HttpCacheListener
 {
     /** Everything a cached representation is keyed on, in one place: the 304 branch is easy to forget. */
-    private const VARY = 'Authorization, Accept, ' . StoreContextListener::HEADER . ', ' . CurrencyContextListener::HEADER;
+    private const VARY = 'Origin, Authorization, Accept, ' . StoreContextListener::HEADER . ', ' . CurrencyContextListener::HEADER;
 
     /** Public endpoints that can be cached by CDN/proxies */
     private const PUBLIC_PATHS = [
@@ -69,29 +69,8 @@ class HttpCacheListener
             return;
         }
 
-        // Generate ETag from response content
-        $content = $response->getContent();
-        if ($content === false || $content === '') {
-            return;
-        }
-
-        $etag = '"' . md5($content) . '"';
-        $response->headers->set('ETag', $etag);
-
-        // Check If-None-Match for 304 Not Modified
-        $ifNoneMatch = $request->headers->get('If-None-Match');
-        if ($ifNoneMatch !== null && $ifNoneMatch === $etag) {
-            $event->setResponse(new Response('', Response::HTTP_NOT_MODIFIED, [
-                'ETag' => $etag,
-                'Vary' => self::VARY,
-            ]));
-            return;
-        }
-
-        // Determine cache tier from the actual security context. The
-        // Authorization header is unreliable: Basic-Auth-protected staging
-        // sites send it for unrelated reasons, and admin-cookie auth (the
-        // bridge listener) authenticates without it.
+        // Determine the cache tier before the conditional branch so a 304
+        // carries the same policy as the equivalent 200 representation.
         $isAuthenticated = $this->security->getUser() !== null;
         $path = $request->getPathInfo();
 
@@ -126,6 +105,26 @@ class HttpCacheListener
 
         // Always add Vary header
         $response->headers->set('Vary', self::VARY);
+
+        // Generate ETag from response content
+        $content = $response->getContent();
+        if ($content === false || $content === '') {
+            return;
+        }
+
+        $etag = '"' . md5($content) . '"';
+        $response->headers->set('ETag', $etag);
+
+        // Check If-None-Match for 304 Not Modified
+        $ifNoneMatch = $request->headers->get('If-None-Match');
+        if ($ifNoneMatch !== null && $ifNoneMatch === $etag) {
+            $event->setResponse(new Response('', Response::HTTP_NOT_MODIFIED, [
+                'ETag'          => $etag,
+                'Vary'          => (string) $response->headers->get('Vary'),
+                'Cache-Control' => (string) $response->headers->get('Cache-Control'),
+            ]));
+            return;
+        }
     }
 
     private function isPublicPath(string $path): bool
