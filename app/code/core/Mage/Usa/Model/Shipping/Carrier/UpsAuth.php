@@ -84,6 +84,11 @@ class Mage_Usa_Model_Shipping_Carrier_UpsAuth extends Mage_Usa_Model_Shipping_Ca
         return self::CACHE_KEY_PREFIX . hash('sha256', $clientId . "\0" . $clientSecret . "\0" . $clientUrl);
     }
 
+    public function invalidateAccessToken(string $clientId, string $clientSecret, string $clientUrl): void
+    {
+        Mage::app()->getCache()->remove($this->getCacheKey($clientId, $clientSecret, $clientUrl));
+    }
+
     #[\Override]
     public function collectRates(Mage_Shipping_Model_Rate_Request $request)
     {

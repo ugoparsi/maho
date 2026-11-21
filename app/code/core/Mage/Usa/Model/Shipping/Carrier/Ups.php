@@ -660,15 +660,6 @@ class Mage_Usa_Model_Shipping_Carrier_Ups extends Mage_Usa_Model_Shipping_Carrie
             $url = $this->_defaultUrls['TrackRest'] . '/';
         }
 
-        try {
-            $accessToken = $this->setAPIAccessRequest();
-        } catch (Exception $e) {
-            Mage::logException($e);
-            $this->_trackingResult = Mage::getModel('shipping/tracking_result');
-            $this->_trackingResult->setError('Authentication error');
-            return $this->_trackingResult;
-        }
-
         $version = 'v1';
         $query = http_build_query([
             'locale' => 'en_US',
@@ -677,31 +668,29 @@ class Mage_Usa_Model_Shipping_Carrier_Ups extends Mage_Usa_Model_Shipping_Carrie
             'returnPOD' => 'false',
         ]);
         $headers = [
-            "Authorization: Bearer $accessToken",
             'Content-Type: application/json',
             'transId: track' . uniqid(),
             'transactionSrc: Maho',
         ];
 
-        $ch = curl_init();
         foreach ($trackings as $tracking) {
             $debugData = ['request' => $tracking];
-            curl_setopt_array($ch, [
-                CURLOPT_URL => $url . $version . '/details/' . $tracking . '?' . $query,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_HEADER => false,
-                CURLOPT_HTTPHEADER => $headers,
-                CURLOPT_TIMEOUT => 30,
-                CURLOPT_SSL_VERIFYPEER => $this->getConfigFlag('verify_peer'),
-            ]);
-            $responseData = curl_exec($ch);
-            if ($responseData === false) {
-                $debugData['result'] = ['error' => curl_error($ch), 'code' => curl_errno($ch)];
+            try {
+                $response = $this->_sendUpsRestRequest(
+                    $url . $version . '/details/' . $tracking . '?' . $query,
+                    null,
+                    false,
+                    $headers,
+                );
+                $debugData['result'] = $response['error'] === null
+                    ? $response['body']
+                    : ['error' => $response['error'], 'code' => $response['errno']];
+                $responseData = $response['body'];
+            } catch (Exception $e) {
+                Mage::logException($e);
+                $debugData['result'] = ['error' => $e->getMessage()];
                 $responseData = '';
-            } else {
-                $debugData['result'] = $responseData;
             }
-            curl_reset($ch);
 
             $this->_debug($debugData);
             $this->_parseRestTrackingResponse($tracking, $responseData);
@@ -893,12 +882,6 @@ class Mage_Usa_Model_Shipping_Carrier_Ups extends Mage_Usa_Model_Shipping_Carrie
         $result = new \Maho\DataObject();
         $this->_prepareShipmentRequest($request);
         $rawJsonRequest = $this->_formShipmentRestRequest($request);
-        try {
-            $accessToken = $this->setAPIAccessRequest();
-        } catch (Exception) {
-            $result->setErrors(Mage::helper('usa')->__('Authentication error'));
-            return $result;
-        }
         $this->_debug(['request_quote' => $rawJsonRequest]);
 
         $shipConfirmUrl = $this->getConfigData('shipconfirm_rest_url');
@@ -907,29 +890,20 @@ class Mage_Usa_Model_Shipping_Carrier_Ups extends Mage_Usa_Model_Shipping_Carrie
         }
 
         /** Rest API Payload */
-        $headers = [
-            "Authorization: Bearer $accessToken",
-            'Content-Type: application/json',
-        ];
+        $headers = ['Content-Type: application/json'];
         $debugData = [
             'request' => $rawJsonRequest,
         ];
 
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $shipConfirmUrl);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HEADER, false);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $rawJsonRequest);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, $this->getConfigFlag('verify_peer'));
-        $responseData = curl_exec($ch);
-        if ($responseData === false) {
-            $debugData['result'] = ['error' => curl_error($ch), 'code' => curl_errno($ch)];
-            $responseData = '';
-        } else {
-            $debugData['result'] = $responseData;
+        try {
+            $response = $this->_sendUpsRestRequest($shipConfirmUrl, $rawJsonRequest, true, $headers);
+            $debugData['result'] = $response['error'] === null
+                ? $response['body']
+                : ['error' => $response['error'], 'code' => $response['errno']];
+            $responseData = $response['body'];
+        } catch (Exception) {
+            $result->setErrors(Mage::helper('usa')->__('Authentication error'));
+            return $result;
         }
 
         $responseData = json_decode($responseData);
@@ -1359,14 +1333,6 @@ class Mage_Usa_Model_Shipping_Carrier_Ups extends Mage_Usa_Model_Shipping_Carrie
         if (!$url) {
             $url = $this->_defaultUrls['RateRest'] . '/';
         }
-        try {
-            $accessToken = $this->setAPIAccessRequest();
-        } catch (Exception $e) {
-            Mage::logException($e);
-            $result = Mage::getModel('shipping/rate_result');
-            $result->setError('Authentication error');
-            return $result;
-        }
         $rowRequest = $this->_rawRequest;
 
         $params = $this->setQuoteRequestData($rowRequest);
@@ -1472,29 +1438,22 @@ class Mage_Usa_Model_Shipping_Carrier_Ups extends Mage_Usa_Model_Shipping_Carrie
         /** Rest API Payload */
         $version = 'v1';
         $requestOption = $params['10_action'];
-        $headers = [
-            "Authorization: Bearer $accessToken",
-            'Content-Type: application/json',
-        ];
+        $headers = ['Content-Type: application/json'];
         $debugData = [
             'request' => $ratePayload,
         ];
 
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url . $version . '/' . $requestOption);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_HEADER, 0);
-        curl_setopt($ch, CURLOPT_POST, 1);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $ratePayload);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, $this->getConfigFlag('verify_peer'));
-        $responseData = curl_exec($ch);
-        if ($responseData === false) {
-            $debugData['result'] = ['error' => curl_error($ch), 'code' => curl_errno($ch)];
-            $responseData = '';
-        } else {
-            $debugData['result'] = $responseData;
+        try {
+            $response = $this->_sendUpsRestRequest($url . $version . '/' . $requestOption, $ratePayload, true, $headers);
+            $debugData['result'] = $response['error'] === null
+                ? $response['body']
+                : ['error' => $response['error'], 'code' => $response['errno']];
+            $responseData = $response['body'];
+        } catch (Exception $e) {
+            Mage::logException($e);
+            $result = Mage::getModel('shipping/rate_result');
+            $result->setError('Authentication error');
+            return $result;
         }
 
         $this->_debug($debugData);
@@ -1676,6 +1635,66 @@ class Mage_Usa_Model_Shipping_Carrier_Ups extends Mage_Usa_Model_Shipping_Carrie
             $authUrl = $this->_defaultUrls['AuthUrl'];
         }
         return Mage::getModel('usa/shipping_carrier_upsAuth')->getAccessToken($userId, $userIdPass, $authUrl);
+    }
+
+    protected function invalidateAPIAccessRequest(): void
+    {
+        $userId = (string) $this->getConfigData('client_id');
+        $userIdPass = (string) $this->getConfigData('client_secret');
+        $authUrl = $this->getConfigFlag('mode') ? $this->_liveUrls['AuthUrl'] : $this->_defaultUrls['AuthUrl'];
+        Mage::getModel('usa/shipping_carrier_upsAuth')->invalidateAccessToken($userId, $userIdPass, $authUrl);
+    }
+
+    /**
+     * Send one UPS REST request and retry once when UPS rejects a cached bearer token.
+     *
+     * @return array{body: string, status: int, error: ?string, errno: int}
+     */
+    protected function _sendUpsRestRequest(string $url, ?string $payload, bool $post, array $headers): array
+    {
+        $accessToken = $this->setAPIAccessRequest();
+        $requestHeaders = array_merge(["Authorization: Bearer $accessToken"], $headers);
+        $response = $this->_sendUpsHttpRequest($url, $payload, $post, $requestHeaders);
+        if ($response['status'] !== 401) {
+            return $response;
+        }
+
+        $this->invalidateAPIAccessRequest();
+        $accessToken = $this->setAPIAccessRequest();
+        $requestHeaders = array_merge(["Authorization: Bearer $accessToken"], $headers);
+
+        return $this->_sendUpsHttpRequest($url, $payload, $post, $requestHeaders);
+    }
+
+    /**
+     * @param string[] $headers
+     * @return array{body: string, status: int, error: ?string, errno: int}
+     */
+    protected function _sendUpsHttpRequest(string $url, ?string $payload, bool $post, array $headers): array
+    {
+        $ch = curl_init();
+        $options = [
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HEADER => false,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_SSL_VERIFYPEER => $this->getConfigFlag('verify_peer'),
+        ];
+        if ($post) {
+            $options[CURLOPT_POST] = true;
+            $options[CURLOPT_POSTFIELDS] = $payload ?? '';
+        }
+        curl_setopt_array($ch, $options);
+        $body = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+        return [
+            'body' => $body === false ? '' : (string) $body,
+            'status' => $status,
+            'error' => $body === false ? curl_error($ch) : null,
+            'errno' => $body === false ? curl_errno($ch) : 0,
+        ];
     }
 
     /**
