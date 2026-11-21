@@ -118,32 +118,33 @@ class Mage_Sales_Model_Order_Invoice_Api extends Mage_Sales_Model_Api_Resource
             $this->_fault('order_not_exists');
         }
 
-        /**
-         * Check invoice create availability
-         */
-        if (!$order->canInvoice()) {
-            $this->_fault('data_invalid', Mage::helper('sales')->__('Cannot do invoice for order.'));
-        }
-
-        $invoice = $order->prepareInvoice($itemsQty);
-
-        $invoice->register();
-
-        if ($comment !== null) {
-            $invoice->addComment($comment, $notifyCustomer);
-        }
-
-        if ($notifyCustomer) {
-            $invoice->setEmailSent(true);
-        }
-
-        $invoice->getOrder()->setIsInProcess(true);
-
         try {
-            $transactionSave = Mage::getModel('core/resource_transaction')
-                ->addObject($invoice)
-                ->addObject($invoice->getOrder())
-                ->save();
+            $invoice = Mage::getService('sales/order')->withOrderLock((int) $order->getId(), function () use ($order, $itemsQty, $comment, $notifyCustomer): Mage_Sales_Model_Order_Invoice {
+                // Re-read under the lock so another invoice created while this request waited
+                // cannot be lost from the order's invoiced totals.
+                $order->load((int) $order->getId());
+                if (!$order->canInvoice()) {
+                    throw new Mage_Core_Exception(Mage::helper('sales')->__('Cannot do invoice for order.'));
+                }
+
+                $invoice = $order->prepareInvoice($itemsQty);
+                $invoice->register();
+
+                if ($comment !== null) {
+                    $invoice->addComment($comment, $notifyCustomer);
+                }
+                if ($notifyCustomer) {
+                    $invoice->setEmailSent(true);
+                }
+
+                $invoice->getOrder()->setIsInProcess(true);
+                Mage::getModel('core/resource_transaction')
+                    ->addObject($invoice)
+                    ->addObject($invoice->getOrder())
+                    ->save();
+
+                return $invoice;
+            });
 
             $invoice->sendEmail($notifyCustomer, ($includeComment ? $comment : ''));
         } catch (Mage_Core_Exception $e) {
