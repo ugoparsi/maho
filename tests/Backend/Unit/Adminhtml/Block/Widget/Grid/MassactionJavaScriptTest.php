@@ -37,6 +37,8 @@ it('serializes request-derived mass-action selection as a JavaScript string', fu
         'form_field_name' => 'massaction',
         'form_field_name_internal' => 'internal_massaction',
         'error_text' => 'Admin\'s "error"',
+        'use_ajax' => false,
+        'use_select_all' => false,
     ]);
 
     $script = $massaction->getJavaScript();
