@@ -8,6 +8,7 @@
  * @package Mage_Core
  */
 
+use Symfony\Component\HttpFoundation\HeaderUtils;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 /**
@@ -98,6 +99,19 @@ class Mage_Core_Controller_Response_Http implements \Stringable
         $this->canSendHeaders(true);
         $this->symfonyResponse->headers->set($this->_normalizeHeader($name), $value, $replace);
         return $this;
+    }
+
+    public static function makeDisposition(string $filename, string $disposition = HeaderUtils::DISPOSITION_ATTACHMENT): string
+    {
+        $pathParts = explode('/', str_replace('\\', '/', $filename));
+        $filename = mb_scrub(array_last($pathParts), 'UTF-8');
+        $filename = preg_replace('/[\x00-\x1F\x7F]/', '', $filename) ?? '';
+        if (trim($filename) === '') {
+            $filename = 'download';
+        }
+
+        $fallback = preg_replace('/[^\x20-\x7E]|%/u', '_', $filename) ?? 'download';
+        return HeaderUtils::makeDisposition($disposition, $filename, $fallback);
     }
 
     /**

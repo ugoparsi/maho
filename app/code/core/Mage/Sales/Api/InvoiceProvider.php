@@ -12,6 +12,7 @@ namespace Mage\Sales\Api;
 
 use ApiPlatform\Metadata\Operation;
 use ApiPlatform\State\Pagination\TraversablePaginator;
+use Mage_Core_Controller_Response_Http;
 use Symfony\Bundle\SecurityBundle\Security;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -150,7 +151,7 @@ class InvoiceProvider extends \Maho\ApiPlatform\Provider
 
         return new Response($pdf, Response::HTTP_OK, [
             'Content-Type' => 'application/pdf',
-            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            'Content-Disposition' => Mage_Core_Controller_Response_Http::makeDisposition($filename),
             'Content-Length' => strlen($pdf),
             'Cache-Control' => 'private, max-age=0, must-revalidate',
         ]);

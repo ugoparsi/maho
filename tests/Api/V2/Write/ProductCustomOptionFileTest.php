@@ -76,7 +76,7 @@ describe('GET /api/rest/v2/custom-option-file/{optionId}/{key}', function (): vo
         $option->setData('code', 'option_' . $productOption->getId());
         $option->setData('value', Mage::helper('core')->jsonEncode([
             'type' => 'text/plain',
-            'title' => 'test.txt',
+            'title' => 'Résumé 2026.txt',
             'quote_path' => $relPath,
             'order_path' => $optionFile->getOrderTargetDir(true) . '/test_missing.txt',
             'secret_key' => $secretKey,
@@ -87,7 +87,9 @@ describe('GET /api/rest/v2/custom-option-file/{optionId}/{key}', function (): vo
         try {
             // Correct hex key must succeed (used to be a permanent 403).
             $ok = apiGet("/api/rest/v2/custom-option-file/{$optionId}/{$secretKey}");
-            expect($ok['status'])->toBe(200);
+            expect($ok['status'])->toBe(200)
+                ->and(apiHeader($ok, 'Content-Disposition'))
+                ->toBe('attachment; filename="R_sum_ 2026.txt"; filename*=utf-8\'\'R%C3%A9sum%C3%A9%202026.txt');
 
             // A wrong key of the same shape is rejected.
             $bad = apiGet("/api/rest/v2/custom-option-file/{$optionId}/" . str_repeat('0', 20));

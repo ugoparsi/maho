@@ -206,7 +206,7 @@ class Mage_Core_Controller_Front_Action extends Mage_Core_Controller_Varien_Acti
             ->setHeader('Cache-Control', 'must-revalidate, post-check=0, pre-check=0', true)
             ->setHeader('Content-type', $contentType, true)
             ->setHeader('Content-Length', (string) ($contentLength ?? strlen($content)))
-            ->setHeader('Content-Disposition', 'attachment; filename="' . $fileName . '"')
+            ->setHeader('Content-Disposition', Mage_Core_Controller_Response_Http::makeDisposition((string) $fileName))
             ->setHeader('Last-Modified', date('r'));
 
         if (!is_null($content)) {

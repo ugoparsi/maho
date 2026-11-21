@@ -89,7 +89,7 @@ describe('Mage_Downloadable_Helper_Download on the downloadable mount', function
 
         expect($url)->toStartWith('https://bucket.example/files/links/m/a/manual.txt?expires=')
             ->and($adapter->lastConfig?->get('get_object_options')['ResponseContentDisposition'])
-            ->toBe('attachment; filename="manual.txt"')
+            ->toBe('attachment; filename=manual.txt')
             ->and($adapter->lastConfig?->get('get_object_options')['ResponseContentType'])
             ->toStartWith('text/plain');
     });

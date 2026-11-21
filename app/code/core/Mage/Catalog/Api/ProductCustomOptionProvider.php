@@ -14,6 +14,7 @@ use ApiPlatform\Metadata\Operation;
 use Mage;
 use Mage_Catalog_Model_Product;
 use Mage_Catalog_Model_Product_Option;
+use Mage_Core_Controller_Response_Http;
 use Maho\ApiPlatform\Trait\ProductLoaderTrait;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -68,7 +69,7 @@ final class ProductCustomOptionProvider extends \Maho\ApiPlatform\Provider
             Response::HTTP_OK,
             [
                 'Content-Type' => $file['type'],
-                'Content-Disposition' => 'attachment; filename="' . addslashes($file['title']) . '"',
+                'Content-Disposition' => Mage_Core_Controller_Response_Http::makeDisposition($file['title']),
                 'Content-Length' => (string) strlen($content),
                 'Cache-Control' => 'private, max-age=3600',
             ],

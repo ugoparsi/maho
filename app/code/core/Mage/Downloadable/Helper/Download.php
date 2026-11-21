@@ -8,6 +8,8 @@
  * @package Mage_Downloadable
  */
 
+use Symfony\Component\HttpFoundation\HeaderUtils;
+
 class Mage_Downloadable_Helper_Download extends Mage_Core_Helper_Abstract
 {
     public const LINK_TYPE_URL         = 'url';
@@ -220,7 +222,10 @@ class Mage_Downloadable_Helper_Download extends Mage_Core_Helper_Abstract
             if (isset($this->_urlHeaders['content-disposition'])) {
                 $contentDisposition = explode('; ', $this->_urlHeaders['content-disposition']);
                 if (!empty($contentDisposition[1]) && str_contains($contentDisposition[1], 'filename=')) {
-                    return substr($contentDisposition[1], 9);
+                    $filename = substr($contentDisposition[1], 9);
+                    return str_starts_with($filename, '"') && str_ends_with($filename, '"')
+                        ? HeaderUtils::unquote($filename)
+                        : $filename;
                 }
             }
             if ($fileName = @pathinfo($this->_resourceFile, PATHINFO_BASENAME)) {
@@ -278,7 +283,9 @@ class Mage_Downloadable_Helper_Download extends Mage_Core_Helper_Abstract
 
         $contentType = (string) $this->getContentType();
         $disposition = $this->getContentDisposition($store);
-        $disposition = $disposition ? $disposition . '; filename="' . addcslashes((string) $this->getFilename(), '"\\') . '"' : null;
+        $disposition = $disposition
+            ? Mage_Core_Controller_Response_Http::makeDisposition((string) $this->getFilename(), $disposition)
+            : null;
 
         return $this->getMount()->temporaryUrl(
             $this->_resourceFile,
@@ -364,10 +371,10 @@ class Mage_Downloadable_Helper_Download extends Mage_Core_Helper_Abstract
     }
 
     /**
-     * Use Content-Disposition: attachment
+     * Get the configured content disposition.
      *
      * @param mixed $store
-     * @return bool
+     * @return string|null
      */
     public function getContentDisposition($store = null)
     {

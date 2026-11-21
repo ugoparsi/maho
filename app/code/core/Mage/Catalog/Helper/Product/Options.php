@@ -34,7 +34,7 @@ class Mage_Catalog_Helper_Product_Options extends Mage_Core_Helper_Abstract
                 ->setHeader('Cache-Control', 'must-revalidate, post-check=0, pre-check=0', true)
                 ->setHeader('Content-type', $info['type'], true)
                 ->setHeader('Content-Length', $info['size'])
-                ->setHeader('Content-Disposition', 'inline' . '; filename=' . $info['title'])
+                ->setHeader('Content-Disposition', Mage_Core_Controller_Response_Http::makeDisposition((string) $info['title'], 'inline'))
                 ->clearBody();
             $response->sendHeaders();
 

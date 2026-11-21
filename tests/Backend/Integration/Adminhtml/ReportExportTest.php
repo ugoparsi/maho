@@ -25,7 +25,7 @@ describe('report export actions', function () {
         new $controllerClass($request, $response)->{$action . 'Action'}();
 
         $headers = array_column($response->getHeaders(), 'value', 'name');
-        expect($headers['Content-Disposition'])->toBe('attachment; filename="' . $fileName . '"')
+        expect($headers['Content-Disposition'])->toBe('attachment; filename=' . $fileName)
             ->and($headers['Content-Type'])->toBe($contentType)
             ->and($response->getBody())->not->toBe('');
     })->with([

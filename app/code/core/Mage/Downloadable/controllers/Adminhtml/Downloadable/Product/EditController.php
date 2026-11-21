@@ -63,7 +63,7 @@ class Mage_Downloadable_Adminhtml_Downloadable_Product_EditController extends Ma
 
         if ($contentDisposition = $helper->getContentDisposition()) {
             $this->getResponse()
-                ->setHeader('Content-Disposition', $contentDisposition . '; filename=' . $fileName);
+                ->setHeader('Content-Disposition', Mage_Core_Controller_Response_Http::makeDisposition((string) $fileName, $contentDisposition));
         }
 
         $this->getResponse()

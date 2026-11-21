@@ -978,7 +978,7 @@ abstract class Mage_Core_Controller_Varien_Action
             ->setHeader('Pragma', 'public', true)
             ->setHeader('Cache-Control', 'must-revalidate, post-check=0, pre-check=0', true)
             ->setHeader('Content-type', $contentType, true)
-            ->setHeader('Content-Disposition', 'attachment; filename="' . $fileName . '"', true)
+            ->setHeader('Content-Disposition', Mage_Core_Controller_Response_Http::makeDisposition((string) $fileName), true)
             ->setHeader('Last-Modified', date('r'), true);
         if (!$isStream || $contentLength !== null) {
             $this->getResponse()->setHeader('Content-Length', (string) ($contentLength ?? strlen($content)), true);
