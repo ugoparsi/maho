@@ -205,6 +205,36 @@ describe('resized image files of an image entity', function () {
             ->and($this->mount->fileExists('catalog/product/a/b/shirt.png'))->toBeTrue();
     });
 
+    it('deletes resized files in an additional configured format for one source', function (): void {
+        $extra = new Mage_Core_Model_Image_Settings([150], extension: '.jpg');
+        $config = new class ($extra) extends Mage_Core_Model_Image_Config {
+            public function __construct(private readonly Mage_Core_Model_Image_Settings $extra) {}
+
+            #[\Override]
+            public function getAllSettings(string $entity): array
+            {
+                $settings = parent::getAllSettings($entity);
+                return $entity === 'product' ? $settings + [$this->extra->getHash() => $this->extra] : $settings;
+            }
+        };
+        ($this->replaceSingleton)('core/image_config', $config);
+        ($this->writePng)('catalog/product/a/b/hat.png', 400, 200);
+
+        $resizer = Mage::getSingleton('core/image_resizer');
+        $resizer->createFiles('product', ['/a/b/shirt.png', '/a/b/hat.png']);
+        $shirt = ($this->pathOf)(150, settings: $extra);
+        $hat = ($this->pathOf)(150, '/a/b/hat.png', $extra);
+        expect($this->mount->fileExists($shirt))->toBeTrue()
+            ->and($this->mount->fileExists($hat))->toBeTrue();
+
+        $resizer->deleteFiles('product', '/a/b/shirt.png');
+
+        expect($this->mount->fileExists($shirt))->toBeFalse()
+            ->and($this->mount->fileExists(($this->pathOf)(150)))->toBeFalse()
+            ->and($this->mount->fileExists($hat))->toBeTrue()
+            ->and($this->mount->fileExists('catalog/product/a/b/shirt.png'))->toBeTrue();
+    });
+
     it('deletes only the settings folders that no store view uses', function (): void {
         $unused = new Mage_Core_Model_Image_Settings([150], quality: 50);
         $resizer = Mage::getSingleton('core/image_resizer');

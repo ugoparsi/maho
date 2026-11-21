@@ -662,15 +662,15 @@ class Mage_Core_Model_Image_Resizer
     }
 
     /**
-     * @return list<string> the output extensions of all store views
+     * @return list<string> the output extensions of all image settings
      */
     protected function getExtensions(): array
     {
         $config = Mage::getSingleton('core/image_config');
         $extensions = [];
-        foreach ($config->getStoreIds() as $storeId) {
-            foreach (array_keys($config->getEntities()) as $entity) {
-                $extensions[] = $config->getSettings($entity, $storeId)->extension;
+        foreach (array_keys($config->getEntities()) as $entity) {
+            foreach ($config->getAllSettings($entity) as $settings) {
+                $extensions[] = $settings->extension;
             }
         }
         return array_values(array_unique($extensions));
