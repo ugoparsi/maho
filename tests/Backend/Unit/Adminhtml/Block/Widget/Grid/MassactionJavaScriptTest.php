@@ -30,7 +30,7 @@ it('serializes request-derived mass-action selection as a JavaScript string', fu
             return 'testGridJsObject';
         }
     };
-    $massaction = Mage::getBlockSingleton('adminhtml/widget_grid_massaction');
+    $massaction = new Mage_Adminhtml_Block_Widget_Grid_Massaction();
     $massaction->setParentBlock($parent);
     $massaction->setData([
         'html_id' => 'test_grid',
