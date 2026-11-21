@@ -471,48 +471,65 @@ class Mage_Adminhtml_Block_Report_Grid extends Mage_Adminhtml_Block_Widget_Grid
         foreach ($this->getCollection()->getIntervals() as $_index => $_item) {
             $report = $this->getReport($_item['start'], $_item['end']);
             foreach ($report as $_subIndex => $_subItem) {
-                $data = ['"' . $_index . '"'];
+                $data = [];
                 foreach ($this->_columns as $column) {
                     if (!$column->getIsSystem()) {
-                        $data[] = '"' . str_replace(
-                            ['"', '\\'],
-                            ['""', '\\\\'],
-                            $column->getRowField($_subItem),
-                        ) . '"';
+                        $data[] = $column->getRowField($_subItem);
                     }
                 }
-                $csv .= implode(',', $data) . "\n";
+                $csv .= $this->formatCsvRow(['"' . $_index . '"'], $data, escapeBackslashes: true);
                 $count++;
                 if (($limit > 0) && ($count > $limit)) {
                     exit('Too many results');
                 }
             }
             if ($this->getCountTotals() && $this->getSubtotalVisibility()) {
-                $data = ['"' . $_index . '"'];
+                $labels = ['"' . $_index . '"'];
+                $data = [];
                 $j = 0;
                 foreach ($this->_columns as $column) {
                     $j++;
-                    if (!$column->getIsSystem()) {
-                        $data[] = ($j == 1)
-                                ? '"' . $this->__('Subtotal') . '"'
-                                : '"' . str_replace('"', '""', $column->getRowField($this->getTotals())) . '"';
+                    if ($column->getIsSystem()) {
+                        continue;
+                    }
+                    if ($j === 1) {
+                        $labels[] = '"' . $this->__('Subtotal') . '"';
+                    } else {
+                        $data[] = $column->getRowField($this->getTotals());
                     }
                 }
-                $csv .= implode(',', $data) . "\n";
+                $csv .= $this->formatCsvRow($labels, $data);
             }
         }
 
         if ($this->getCountTotals()) {
-            $data = ['"' . $this->__('Total') . '"'];
+            $data = [];
             foreach ($this->_columns as $column) {
                 if (!$column->getIsSystem()) {
-                    $data[] = '"' . str_replace('"', '""', $column->getRowField($this->getGrandTotals())) . '"';
+                    $data[] = $column->getRowField($this->getGrandTotals());
                 }
             }
-            $csv .= implode(',', $data) . "\n";
+            $csv .= $this->formatCsvRow(['"' . $this->__('Total') . '"'], $data);
         }
 
         return $csv;
+    }
+
+    /**
+     * @param list<string> $quotedFields
+     * @param list<string> $values
+     */
+    private function formatCsvRow(array $quotedFields, array $values, bool $escapeBackslashes = false): string
+    {
+        $replacements = ['"' => '""'];
+        if ($escapeBackslashes) {
+            $replacements['\\'] = '\\\\';
+        }
+
+        foreach (Mage::helper('core')->getEscapedCSVData($values) as $value) {
+            $quotedFields[] = '"' . strtr((string) $value, $replacements) . '"';
+        }
+        return implode(',', $quotedFields) . "\n";
     }
 
     /**
