@@ -257,11 +257,27 @@ class Mage_CatalogRule_Model_Resource_Rule extends Mage_Rule_Model_Resource_Abst
      *
      * @return array
      */
-    public function getRuleProductIds($ruleId)
-    {
+    public function getRuleProductIds(
+        $ruleId,
+        ?int $websiteId = null,
+        ?int $customerGroupId = null,
+        ?int $timestamp = null,
+    ) {
         $read = $this->_getReadAdapter();
         $select = $read->select()->from($this->getTable('catalogrule/rule_product'), 'product_id')
             ->where('rule_id=?', $ruleId);
+
+        if ($websiteId !== null || $customerGroupId !== null || $timestamp !== null) {
+            $timestamp = $timestamp === null ? time() : (int) $timestamp;
+            if ($websiteId !== null) {
+                $select->where('website_id = ?', (int) $websiteId);
+            }
+            if ($customerGroupId !== null) {
+                $select->where('customer_group_id = ?', (int) $customerGroupId);
+            }
+            $select->where('from_time = 0 OR from_time < ?', $timestamp)
+                ->where('to_time = 0 OR to_time > ?', $timestamp);
+        }
 
         return $read->fetchCol($select);
     }

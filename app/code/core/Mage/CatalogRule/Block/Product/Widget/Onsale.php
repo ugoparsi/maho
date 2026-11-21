@@ -64,7 +64,12 @@ class Mage_CatalogRule_Block_Product_Widget_Onsale extends Mage_Catalog_Block_Pr
         $rulePrices = $resource->getActiveRuleProductPrices($date, $websiteId, $customerGroupId);
 
         if ($this->getRuleId()) {
-            $ruleProductIds = array_flip($resource->getRuleProductIds($this->getRuleId()));
+            $ruleProductIds = array_flip($resource->getRuleProductIds(
+                $this->getRuleId(),
+                $websiteId,
+                $customerGroupId,
+                time(),
+            ));
             $rulePrices = array_intersect_key($rulePrices, $ruleProductIds);
         }
 
