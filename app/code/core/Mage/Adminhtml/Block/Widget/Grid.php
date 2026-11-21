@@ -1320,6 +1320,7 @@ class Mage_Adminhtml_Block_Widget_Grid extends Mage_Adminhtml_Block_Widget
         $csv .= implode(',', $data) . "\n";
 
         foreach ($this->getCollection() as $item) {
+            $data = [];
             $row = [];
             foreach ($this->_columns as $column) {
                 if (!$column->getIsSystem()) {
@@ -1333,13 +1334,13 @@ class Mage_Adminhtml_Block_Widget_Grid extends Mage_Adminhtml_Block_Widget
         }
 
         if ($this->getCountTotals()) {
+            $data = [];
             $row = [];
             foreach ($this->_columns as $column) {
                 if (!$column->getIsSystem()) {
                     $row[] = (string) $column->getRowFieldExport($this->getTotals());
                 }
             }
-            $data = [];
             foreach (Mage::helper('core')->getEscapedCSVData($row) as $value) {
                 $data[] = '"' . str_replace(['"', '\\'], ['""', '\\\\'], $value) . '"';
             }
