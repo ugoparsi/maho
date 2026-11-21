@@ -215,8 +215,7 @@ abstract class Mage_Adminhtml_Block_Widget_Grid_Massaction_Abstract extends Mage
     public function getSelectedJson()
     {
         if ($selected = $this->getRequest()->getParam($this->getFormFieldNameInternal())) {
-            $selected = explode(',', $this->quoteEscape($selected));
-            return implode(',', $selected);
+            return (string) $selected;
         }
         return '';
     }
@@ -229,8 +228,7 @@ abstract class Mage_Adminhtml_Block_Widget_Grid_Massaction_Abstract extends Mage
     public function getSelected()
     {
         if ($selected = $this->getRequest()->getParam($this->getFormFieldNameInternal())) {
-            $selected = explode(',', $this->quoteEscape($selected));
-            return $selected;
+            return explode(',', (string) $selected);
         }
         return [];
     }
@@ -250,14 +248,18 @@ abstract class Mage_Adminhtml_Block_Widget_Grid_Massaction_Abstract extends Mage
      */
     public function getJavaScript()
     {
-        return " var {$this->getJsObjectName()} = new varienGridMassaction('{$this->getHtmlId()}', "
-                . "{$this->getGridJsObjectName()}, '{$this->getSelectedJson()}'"
-                . ", '{$this->getFormFieldNameInternal()}', '{$this->getFormFieldName()}');"
+        $json = static fn(mixed $value): string => Mage::helper('core')->jsonEncode($value);
+        return " var {$this->getJsObjectName()} = new varienGridMassaction("
+                . $json($this->getHtmlId()) . ', '
+                . $this->getGridJsObjectName() . ', '
+                . $json($this->getSelectedJson()) . ', '
+                . $json($this->getFormFieldNameInternal()) . ', '
+                . $json($this->getFormFieldName()) . ');'
                 . "{$this->getJsObjectName()}.setItems({$this->getItemsJson()}); "
                 . "{$this->getJsObjectName()}.setGridIds('{$this->getGridIdsJson()}');"
                 . ($this->getUseAjax() ? "{$this->getJsObjectName()}.setUseAjax(true);" : '')
                 . ($this->getUseSelectAll() ? "{$this->getJsObjectName()}.setUseSelectAll(true);" : '')
-                . "{$this->getJsObjectName()}.errorText = '{$this->getErrorText()}';";
+                . "{$this->getJsObjectName()}.errorText = " . $json((string) $this->getErrorText()) . ';';
     }
 
     /**

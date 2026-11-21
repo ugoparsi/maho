@@ -143,6 +143,14 @@ describe('Revocation grid suppression chip', function () {
             ->and($csv)->toContain($this->delivered->getEmail());
     });
 
+    it('escapes formula-looking text in the in-memory CSV export', function () {
+        $this->delivered->setCustomerName('=1+1')->save();
+
+        $csv = revocationSuppressionGrid('0')->getCsv();
+
+        expect($csv)->toContain('" =1+1"');
+    });
+
     it('counts all requests with a suppressed receipt email', function () {
         $grid = revocationSuppressionGrid('0');
         $count = $grid->getSuppressedCount();
