@@ -24,9 +24,14 @@ class Mage_Adminhtml_Model_System_Config_Backend_Product_Alert_Cron extends Mage
         if (!is_array($time)) {
             $time = [];
         }
+        $minute = (int) ($time[1] ?? 0);
+        $hour = (int) ($time[0] ?? 0);
+        if ($minute < 0 || $minute > 59 || $hour < 0 || $hour > 23) {
+            Mage::throwException(Mage::helper('cron')->__('Cron hour must be between 0 and 23 and minute between 0 and 59.'));
+        }
         $cronExprArray      = [
-            (int) ($time[1] ?? 0),                                  # Minute
-            (int) ($time[0] ?? 0),                                  # Hour
+            $minute,                                                # Minute
+            $hour,                                                  # Hour
             ($frequency == $frequencyMonthly) ? '1' : '*',          # Day of the Month
             '*',                                                    # Month of the Year
             ($frequency == $frequencyWeekly) ? '1' : '*',           # Day of the Week

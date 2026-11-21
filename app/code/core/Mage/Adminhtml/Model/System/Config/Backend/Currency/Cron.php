@@ -21,9 +21,18 @@ class Mage_Adminhtml_Model_System_Config_Backend_Currency_Cron extends Mage_Core
         $frequencyWeekly = Mage_Adminhtml_Model_System_Config_Source_Cron_Frequency::CRON_WEEKLY;
         $frequencyMonthly = Mage_Adminhtml_Model_System_Config_Source_Cron_Frequency::CRON_MONTHLY;
 
+        if (!is_array($time)) {
+            $time = [];
+        }
+        $minute = (int) ($time[1] ?? 0);
+        $hour = (int) ($time[0] ?? 0);
+        if ($minute < 0 || $minute > 59 || $hour < 0 || $hour > 23) {
+            Mage::throwException(Mage::helper('cron')->__('Cron hour must be between 0 and 23 and minute between 0 and 59.'));
+        }
+
         $cronExprArray = [
-            (int) $time[1],                                   # Minute
-            (int) $time[0],                                   # Hour
+            $minute,                                                # Minute
+            $hour,                                                  # Hour
             ($frequency == $frequencyMonthly) ? '1' : '*',          # Day of the Month
             '*',                                                    # Month of the Year
             ($frequency == $frequencyWeekly) ? '1' : '*',           # Day of the Week
