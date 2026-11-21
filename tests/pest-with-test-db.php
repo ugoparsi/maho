@@ -249,10 +249,10 @@ class PestTestRunner
     private function setupMysqlDatabase(): void
     {
         // Drop existing test database
-        $this->executeCommand($this->getMysqlCommand('DROP DATABASE IF EXISTS `' . $this->testDbName . '`;'));
+        $this->executeMysqlCommand('DROP DATABASE IF EXISTS `' . $this->testDbName . '`;');
 
         // Create new test database
-        $this->executeCommand($this->getMysqlCommand('CREATE DATABASE `' . $this->testDbName . '` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;'));
+        $this->executeMysqlCommand('CREATE DATABASE `' . $this->testDbName . '` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;');
         echo "✓ Created test database\n";
 
         $this->installMaho('mysql');
@@ -261,8 +261,8 @@ class PestTestRunner
     private function setupPostgresDatabase(): void
     {
         // Drop and recreate test database
-        $this->executeCommand($this->getPsqlCommand("DROP DATABASE IF EXISTS \"{$this->testDbName}\";", 'postgres'));
-        $this->executeCommand($this->getPsqlCommand("CREATE DATABASE \"{$this->testDbName}\";", 'postgres'));
+        $this->executePsqlCommand("DROP DATABASE IF EXISTS \"{$this->testDbName}\";", 'postgres');
+        $this->executePsqlCommand("CREATE DATABASE \"{$this->testDbName}\";", 'postgres');
         echo "✓ Created test database\n";
 
         $this->installMaho('pgsql');
@@ -372,13 +372,21 @@ class PestTestRunner
         }
     }
 
-    private function getMysqlCommand(string $sql): string
+    private function executeMysqlCommand(string $sql): void
+    {
+        $this->executeCommand(
+            $this->getMysqlCommand($sql),
+            $this->getMysqlCommand($sql, redactPassword: true),
+        );
+    }
+
+    private function getMysqlCommand(string $sql, bool $redactPassword = false): string
     {
         $cmd = 'mysql -h ' . escapeshellarg($this->dbConfig['host'])
                . ' -u ' . escapeshellarg($this->dbConfig['user']);
 
         if (!empty($this->dbConfig['pass'])) {
-            $cmd .= ' -p' . escapeshellarg($this->dbConfig['pass']);
+            $cmd .= $redactPassword ? ' -p***' : ' -p' . escapeshellarg($this->dbConfig['pass']);
         }
 
         return $cmd . ' -e ' . escapeshellarg($sql);
@@ -410,11 +418,20 @@ class PestTestRunner
         return 'psql'; // Default, will fail with clear error if not found
     }
 
-    private function getPsqlCommand(string $sql, ?string $database = null): string
+    private function executePsqlCommand(string $sql, ?string $database = null): void
+    {
+        $this->executeCommand(
+            $this->getPsqlCommand($sql, $database),
+            $this->getPsqlCommand($sql, $database, redactPassword: true),
+        );
+    }
+
+    private function getPsqlCommand(string $sql, ?string $database = null, bool $redactPassword = false): string
     {
         $db = $database ?? $this->testDbName;
         $psql = $this->getPsqlBinary();
-        $cmd = 'PGPASSWORD=' . escapeshellarg($this->dbConfig['pass'])
+        $password = $redactPassword ? '***' : escapeshellarg($this->dbConfig['pass']);
+        $cmd = 'PGPASSWORD=' . $password
                . ' ' . $psql . ' -h ' . escapeshellarg($this->dbConfig['host'])
                . ' -U ' . escapeshellarg($this->dbConfig['user'])
                . ' -d ' . escapeshellarg($db);
@@ -422,15 +439,16 @@ class PestTestRunner
         return $cmd . ' -c ' . escapeshellarg($sql);
     }
 
-    private function executeCommand(string $command): void
+    private function executeCommand(string $command, ?string $displayCommand = null): void
     {
-        echo "Running: $command\n";
+        $displayCommand ??= $command;
+        echo "Running: $displayCommand\n";
         flush();
 
         passthru($command, $returnVar);
 
         if ($returnVar !== 0) {
-            throw new Exception("Command failed: $command");
+            throw new Exception("Command failed: $displayCommand");
         }
     }
 
