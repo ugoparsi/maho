@@ -215,8 +215,7 @@ abstract class Mage_Adminhtml_Block_Widget_Grid_Massaction_Abstract extends Mage
     public function getSelectedJson()
     {
         if ($selected = $this->getRequest()->getParam($this->getFormFieldNameInternal())) {
-            $selected = explode(',', $this->quoteEscape($selected));
-            return implode(',', $selected);
+            return (string) $selected;
         }
         return '';
     }
@@ -229,8 +228,7 @@ abstract class Mage_Adminhtml_Block_Widget_Grid_Massaction_Abstract extends Mage
     public function getSelected()
     {
         if ($selected = $this->getRequest()->getParam($this->getFormFieldNameInternal())) {
-            $selected = explode(',', $this->quoteEscape($selected));
-            return $selected;
+            return explode(',', (string) $selected);
         }
         return [];
     }
@@ -251,7 +249,7 @@ abstract class Mage_Adminhtml_Block_Widget_Grid_Massaction_Abstract extends Mage
     public function getJavaScript()
     {
         return " var {$this->getJsObjectName()} = new varienGridMassaction('{$this->getHtmlId()}', "
-                . "{$this->getGridJsObjectName()}, '{$this->getSelectedJson()}'"
+                . "{$this->getGridJsObjectName()}, " . Mage::helper('core')->jsEscape($this->getSelectedJson())
                 . ", '{$this->getFormFieldNameInternal()}', '{$this->getFormFieldName()}');"
                 . "{$this->getJsObjectName()}.setItems({$this->getItemsJson()}); "
                 . "{$this->getJsObjectName()}.setGridIds('{$this->getGridIdsJson()}');"
