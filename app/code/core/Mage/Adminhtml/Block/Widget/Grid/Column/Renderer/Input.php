@@ -20,11 +20,10 @@ class Mage_Adminhtml_Block_Widget_Grid_Column_Renderer_Input extends Mage_Adminh
     #[\Override]
     public function render(\Maho\DataObject $row)
     {
-        $helper = Mage::helper('core');
         $html = '<input type="text" ';
-        $html .= 'name="' . $helper->quoteEscape($this->getColumn()->getId()) . '" ';
-        $html .= 'value="' . $helper->quoteEscape($row->getData($this->getColumn()->getIndex())) . '" ';
-        $html .= 'class="input-text ' . $helper->quoteEscape($this->getColumn()->getInlineCss()) . '">';
+        $html .= 'name="' . $this->getColumn()->getId() . '" ';
+        $html .= 'value="' . $row->getData($this->getColumn()->getIndex()) . '"';
+        $html .= 'class="input-text ' . $this->getColumn()->getInlineCss() . '">';
         return $html;
     }
 }
