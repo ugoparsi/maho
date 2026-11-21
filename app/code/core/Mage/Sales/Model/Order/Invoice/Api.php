@@ -200,17 +200,8 @@ class Mage_Sales_Model_Order_Invoice_Api extends Mage_Sales_Model_Api_Resource
             $this->_fault('not_exists');
         }
 
-        if (!$invoice->canCapture()) {
-            $this->_fault('status_not_changed', Mage::helper('sales')->__('Invoice cannot be captured.'));
-        }
-
         try {
-            $invoice->capture();
-            $invoice->getOrder()->setIsInProcess(true);
-            $transactionSave = Mage::getModel('core/resource_transaction')
-                ->addObject($invoice)
-                ->addObject($invoice->getOrder())
-                ->save();
+            Mage::getService('sales/order_document')->captureInvoice($invoice);
         } catch (Mage_Core_Exception $e) {
             $this->_fault('status_not_changed', $e->getMessage());
         } catch (Exception) {
