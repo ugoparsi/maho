@@ -59,7 +59,7 @@ public function refreshSegments(): void { }
 ```
 
 !!! note
-    Provide either `schedule` or `configPath`, not both. If neither is set, the job can only be triggered manually via `./maho cron:run <job_id>`.
+    Provide either `schedule` or `configPath`. Omit both for a manual-only job that runs via `./maho cron:run <job_id>`. This requires a Composer plugin with manual-only job support. Older plugin versions warn and skip the declaration.
 
 Individual cron job failures are caught and recorded without stopping the rest of the cron run.
 

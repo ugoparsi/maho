@@ -17,12 +17,15 @@ use Attribute;
  * Compiled at `composer dump-autoload` into `vendor/composer/maho_attributes.php`.
  * Run `composer dump-autoload` after adding, modifying, or removing this attribute.
  * Provide either a fixed `$schedule` or a `$configPath` for admin-configurable schedules, not both.
+ * Omit both to declare a manual-only job.
  *
  * @see Mage_Cron_Model_Observer::dispatch()
  */
 #[Attribute(Attribute::TARGET_METHOD)]
 readonly class CronJob
 {
+    public const bool SUPPORTS_MANUAL_ONLY_JOBS = true;
+
     /**
      * @param string  $id         Job identifier (e.g. 'sitemap_generate', 'core_clean_cache')
      * @param ?string $schedule   Cron expression (e.g. '0 2 * * *')

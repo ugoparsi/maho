@@ -93,10 +93,14 @@ class Mage_Cron_Model_Observer
 
             try {
                 if (isset($compiledJobs[$jobCode])) {
-                    if (!empty($compiledJobs[$jobCode]['module']) && !Mage::helper('core')->isModuleEnabled($compiledJobs[$jobCode]['module'])) {
+                    $jobDef = $compiledJobs[$jobCode];
+                    if ($this->isManualOnly($jobDef)) {
                         continue;
                     }
-                    $this->_processCompiledJob($schedule, $compiledJobs[$jobCode]);
+                    if (!empty($jobDef['module']) && !Mage::helper('core')->isModuleEnabled($jobDef['module'])) {
+                        continue;
+                    }
+                    $this->_processCompiledJob($schedule, $jobDef);
                     continue;
                 }
 
@@ -236,9 +240,10 @@ class Mage_Cron_Model_Observer
     {
         $scheduleAheadFor = Mage::getStoreConfig(self::XML_PATH_SCHEDULE_AHEAD_FOR) * 60;
         $schedule = Mage::getModel('cron/schedule');
+        $compiledJobs = Maho::getCompiledAttributes()['crontab'] ?? [];
 
         foreach ($jobs as $jobCode => $jobConfig) {
-            if (!Mage::helper('cron')->isJobEnabled($jobCode)) {
+            if ($this->isManualOnly($compiledJobs[$jobCode] ?? null) || !Mage::helper('cron')->isJobEnabled($jobCode)) {
                 continue;
             }
             $cronExpr = null;
@@ -399,7 +404,8 @@ class Mage_Cron_Model_Observer
             return;
         }
 
-        if (!Mage::helper('cron')->isJobEnabled($jobCode)) {
+        $jobDef = Maho::getCompiledAttributes()['crontab'][$jobCode] ?? null;
+        if ($this->isManualOnly($jobDef) || !Mage::helper('cron')->isJobEnabled($jobCode)) {
             return;
         }
 
@@ -508,6 +514,12 @@ class Mage_Cron_Model_Observer
         return $this;
     }
 
+    /** @param array{schedule?: ?string, config_path?: ?string}|null $jobDef */
+    private function isManualOnly(?array $jobDef): bool
+    {
+        return $jobDef !== null && ($jobDef['schedule'] ?? null) === null && ($jobDef['config_path'] ?? null) === null;
+    }
+
     protected function _generateCompiledJobs(array $exists): void
     {
         $scheduleAheadFor = Mage::getStoreConfig(self::XML_PATH_SCHEDULE_AHEAD_FOR) * 60;
@@ -517,7 +529,7 @@ class Mage_Cron_Model_Observer
         $timeAhead = $now + $scheduleAheadFor;
 
         foreach (Maho::getCompiledAttributes()['crontab'] ?? [] as $jobCode => $jobDef) {
-            if (!$cronHelper->isJobEnabled($jobCode)) {
+            if ($this->isManualOnly($jobDef) || !$cronHelper->isJobEnabled($jobCode)) {
                 continue;
             }
             if (!empty($jobDef['module']) && !Mage::helper('core')->isModuleEnabled($jobDef['module'])) {
