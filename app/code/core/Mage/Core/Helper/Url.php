@@ -131,7 +131,11 @@ class Mage_Core_Helper_Url extends Mage_Core_Helper_Abstract
             if ($val === null || $val === false) {
                 $parts['path'] = preg_replace($regex, '/', $parts['path']);
             } elseif (preg_match($regex, $parts['path'])) {
-                $parts['path'] = preg_replace($regex, "/{$key}/{$val}/", $parts['path']);
+                $parts['path'] = preg_replace_callback(
+                    $regex,
+                    static fn(): string => "/{$key}/{$val}/",
+                    $parts['path'],
+                );
             } else {
                 $parts['path'] .= "{$key}/{$val}/";
             }

@@ -239,7 +239,7 @@ class Mage_Core_Helper_Js extends Mage_Core_Helper_Abstract
         $message ??= Mage::helper('adminhtml')->__('Are you sure you want to do this?');
 
         $message = Mage::helper('core')->jsQuoteEscape($message);
-        return 'deleteConfirm(\'' . $message . '\', \'' . $url . '\')';
+        return 'deleteConfirm(\'' . $message . '\', ' . $this->jsEscape($url) . ')';
     }
 
     /**
@@ -253,7 +253,7 @@ class Mage_Core_Helper_Js extends Mage_Core_Helper_Abstract
         $message ??= Mage::helper('adminhtml')->__('Are you sure you want to do this?');
 
         $message = Mage::helper('core')->jsQuoteEscape($message);
-        return "confirmSetLocation('{$message}', '{$url}')";
+        return "confirmSetLocation('{$message}', {$this->jsEscape($url)})";
     }
 
     /**
@@ -261,7 +261,7 @@ class Mage_Core_Helper_Js extends Mage_Core_Helper_Abstract
      */
     public function getSetLocationJs(string $url): string
     {
-        return 'setLocation(\'' . $url . '\')';
+        return 'setLocation(' . $this->jsEscape($url) . ')';
     }
 
     /**
@@ -269,6 +269,6 @@ class Mage_Core_Helper_Js extends Mage_Core_Helper_Abstract
      */
     public function getSaveAndContinueEditJs(string $url): string
     {
-        return 'saveAndContinueEdit(\'' . $url . '\')';
+        return 'saveAndContinueEdit(' . $this->jsEscape($url) . ')';
     }
 }
