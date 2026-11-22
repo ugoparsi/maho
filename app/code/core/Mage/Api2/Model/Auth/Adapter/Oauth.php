@@ -52,7 +52,12 @@ class Mage_Api2_Model_Auth_Adapter_Oauth extends Mage_Api2_Model_Auth_Adapter_Ab
     public function isApplicableToRequest(Mage_Api2_Model_Request $request)
     {
         $headerValue = $request->getHeader('Authorization');
+        if (!$headerValue) {
+            return false;
+        }
 
-        return $headerValue && strtolower(substr($headerValue, 0, 5)) === 'oauth';
+        $headerParts = preg_split('/\s+/', trim($headerValue), 2);
+
+        return isset($headerParts[0]) && strcasecmp($headerParts[0], 'OAuth') === 0;
     }
 }

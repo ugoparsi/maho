@@ -190,9 +190,10 @@ class Mage_Oauth_Model_Server
     protected function _fetchParams()
     {
         $authHeaderValue = $this->_request->getHeader('Authorization');
+        $headerParts = $authHeaderValue ? preg_split('/\s+/', trim($authHeaderValue), 2) : [];
 
-        if ($authHeaderValue && strtolower(substr($authHeaderValue, 0, 5)) === 'oauth') {
-            $authHeaderValue = substr($authHeaderValue, 6); // ignore 'OAuth ' at the beginning
+        if (isset($headerParts[0], $headerParts[1]) && strcasecmp($headerParts[0], 'OAuth') === 0) {
+            $authHeaderValue = $headerParts[1];
 
             foreach (explode(',', $authHeaderValue) as $paramStr) {
                 $nameAndValue = explode('=', trim($paramStr), 2);
